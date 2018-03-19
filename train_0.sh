@@ -9,12 +9,13 @@ mkdir -p $LOG_DIR
 nohup python main_es.py \
   --data_dir=data \
   --model_dir=$MODEL_DIR \
-  --train_epochs=600 \
-  --num_blocks=3 \
+  --train_epochs=800 \
+  --num_blocks=2 \
   --num_cells=6 \
   --num_nodes=7 \
-  --filters=128 \
+  --filters=32 \
   --depth_multiplier=1 \
-  --batch_size=64 \
+  --batch_size=128 \
   --epochs_per_eval=10 \
+  --dag=1 \
   --lr_schedule=decay >$LOG_DIR/train.$2.log 2>&1 &
