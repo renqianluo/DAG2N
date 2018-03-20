@@ -26,16 +26,13 @@ parser.add_argument('--data_dir', type=str, default='/tmp/cifar10_data',
 parser.add_argument('--model_dir', type=str, default='/tmp/cifar10_model',
                     help='The directory where the model will be stored.')
 
-parser.add_argument('--num_blocks', type=int, default=1,
-                    help='The number of the blocks.')
-
-parser.add_argument('--num_cells', type=int, default=6,
-                    help='The number of convolution cells in a block.')
-
 parser.add_argument('--num_nodes', type=int, default=7,
                     help='The number of nodes in a cell.')
 
-parser.add_argument('--filters', type=int, default=64,
+parser.add_argument('--arch', type=str, default="convx3-reducx1-convx3-reducx1-convx3",
+                    help='The architecture of the network.')
+
+parser.add_argument('--filters', type=int, default=36,
                     help='The numer of filters.')
 
 parser.add_argument('--depth_multiplier', type=int, default=1,
@@ -384,8 +381,7 @@ def main(unused_argv):
   cifar_classifier = tf.estimator.Estimator(
       model_fn=cifar10_model_fn, model_dir=FLAGS.model_dir, config=run_config,
       params={
-        'num_blocks': FLAGS.num_blocks,
-        'num_cells': FLAGS.num_cells,
+        'arch': FLAGS.arch,
         'num_nodes': FLAGS.num_nodes,
         'num_classes': _NUM_CLASSES,
         'filters': FLAGS.filters,

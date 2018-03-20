@@ -214,8 +214,6 @@ def reduction_cell(last_inputs, inputs, params, is_training):
 def build_block(inputs, params, is_training):
   num_cells = params['num_cells']
   # first convolution_cell
-  with tf.variable_scope('convolution_cell_1'):
-    last_inputs, inputs = convolution_cell(inputs, inputs, params, is_training)
   for i in xrange(1, num_cells):
     with tf.variable_scope('convolution_cell_%d' % (i+1)):
       last_inputs, inputs = convolution_cell(last_inputs, inputs, params, is_training)
@@ -252,7 +250,7 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
   data_format = params['data_format']
   num_classes = params['num_classes']
   filters = params['filters']
-  num_blocks = params['num_blocks']
+  arch = params['arch']
   
   if data_format == 'channels_first':
     # Convert the inputs from channels_last (NHWC) to channels_first (NCHW).
@@ -261,20 +259,43 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
     inputs = tf.transpose(inputs, [0, 3, 1, 2])
  
   with tf.variable_scope('body', reuse=reuse):
-    with tf.variable_scope('input_convonlution'):
-      inputs = tf.layers.conv2d(
+    with tf.variable_scope('layer_1'):
+      last_inputs = tf.layers.conv2d(
         inputs=inputs, filters=filters, kernel_size=1, strides=1,
         padding='SAME', #use_bias=False,
         kernel_initializer=tf.variance_scaling_initializer(),
         data_format=data_format)
-      inputs = tf.nn.relu(batch_normalization(inputs, data_format, is_training))
-    for i in xrange(1, num_blocks + 1):
-      with tf.variable_scope('block_%d' % i):
-        inputs = build_block(inputs, params, is_training)
+    with tf.variable_scope('layer_2'):
+      inputs = tf.layers.conv2d(
+        inputs=last_inputs, filters=filters, kernel_size=1, strides=1,
+        padding='SAME', #use_bias=False,
+        kernel_initializer=tf.variance_scaling_initializer(),
+        data_format=data_format)
+
+    arch = arch.split('-')
+    conv_cell_count, reduc_cell_count = 0
+    for cell_com in arch:
+      cell, num = cell_com.split('x')
+      num = int(num)
+      if cell == 'conv':
+        for i in xrange(conv_cell_count + 1, conv_cell_count + 1 + num)
+          with tf.variable_scope('convolution_cell_%d' % i):
+            last_inputs, inputs = convolution_cell(last_inputs, inputs, params, is_training)
+        conv_cell_count += num
+      elif cell == 'reduc':
+        for i in xrange(reduc_cell_count + 1, reduc_cell_count + 1 + num)
+          with tf.variable_scope('reduction_cell_%d' % i):
+            params['filters'] *= 2
+            last_inputs, inputs = reduction_cell(last_inputs, inputs, params, is_training)
+        reduc_cell_count += num
+        
     with tf.variable_scope('final_global_average_pooling'):
       inputs = tf.layers.average_pooling2d(
-        inputs=inputs, pool_size=32//(2**num_blocks), strides=1, padding='VALID', data_format=data_format)
-    inputs = tf.reshape(inputs, [-1, filters])
+        inputs=inputs, pool_size=32//(2**reduc_cell_count), strides=1, padding='VALID', data_format=data_format)
+    
+    inputs = tf.reshape(inputs, [-1, filters * 2**(reduc_cell_count)])
+
     with tf.variable_scope('fully_connected_layer'):
       inputs = tf.layers.dense(inputs=inputs, units=num_classes)
+
   return inputs
