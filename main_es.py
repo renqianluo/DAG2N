@@ -53,6 +53,9 @@ parser.add_argument('--random_dag', type=bool, default=False,
 parser.add_argument('--dag', type=int, default=0,
                     help='Dag to run.')
 
+parser.add_argument('--activation', type=str, default=None,
+					help='Activation function for convolutions.')
+
 parser.add_argument(
     '--data_format', type=str, default=None,
     choices=['channels_first', 'channels_last'],
@@ -389,7 +392,8 @@ def main(unused_argv):
         'conv_dag': conv_dag,
         'reduc_dag': reduc_dag,
         'data_format': FLAGS.data_format,
-        'batch_size': FLAGS.batch_size,
+        'batch_size': FLAGS.batch_size
+        'activation': FLAGS.activation,
       })
 
   for _ in range(FLAGS.train_epochs // FLAGS.epochs_per_eval):
