@@ -381,6 +381,8 @@ def main(unused_argv):
   os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 
   conv_dag, reduc_dag = build_dag()
+  
+  total_steps = int(FLAGS.train_epochs * _NUM_IMAGES['train'] / float(FLAGS.batch_size))
 
   # Set up a RunConfig to only save checkpoints once per training cycle.
   run_config = tf.estimator.RunConfig().replace(save_checkpoints_secs=1e9)
@@ -391,14 +393,14 @@ def main(unused_argv):
         'num_nodes': FLAGS.num_nodes,
         'num_classes': _NUM_CLASSES,
         'filters': FLAGS.filters,
-        'dropout': FLAGS.dropout,
         'conv_dag': conv_dag,
         'reduc_dag': reduc_dag,
         'data_format': FLAGS.data_format,
-        'batch_size': FLAGS.batch_size
+        'batch_size': FLAGS.batch_size,
         'activation': FLAGS.activation,
         'dense_dropout_keep_prob': FLAGS.dense_dropout_keep_prob,
-        'drop_path_keep_prob': drop_path_keep_prob,
+        'drop_path_keep_prob': FLAGS.drop_path_keep_prob,
+        'total_steps': total_steps,
       })
 
   for _ in range(FLAGS.train_epochs // FLAGS.epochs_per_eval):

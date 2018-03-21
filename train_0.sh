@@ -14,4 +14,4 @@ nohup python main_es.py \
   --filters=36 \
   --batch_size=128 \
   --epochs_per_eval=5 \
-  --lr_schedule=decay >$LOG_DIR/train.$2.log 2>&1 &
+  --lr_schedule=cosine >$LOG_DIR/train.$2.log 2>&1 &
