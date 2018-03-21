@@ -35,8 +35,8 @@ parser.add_argument('--arch', type=str, default="convx3-reducx1-convx3-reducx1-c
 parser.add_argument('--filters', type=int, default=36,
                     help='The numer of filters.')
 
-parser.add_argument('--depth_multiplier', type=int, default=1,
-                    help='The number of depth_multiplier in depthwise separable convolution')
+parser.add_argument('--dropout', type=float, default=0.4,
+                    help='Dropout rate.')
 
 parser.add_argument('--train_epochs', type=int, default=310,
                     help='The number of epochs to train.')
@@ -385,7 +385,7 @@ def main(unused_argv):
         'num_nodes': FLAGS.num_nodes,
         'num_classes': _NUM_CLASSES,
         'filters': FLAGS.filters,
-        'depth_multiplier': FLAGS.depth_multiplier,
+        'dropout': FLAGS.dropout,
         'conv_dag': conv_dag,
         'reduc_dag': reduc_dag,
         'data_format': FLAGS.data_format,
