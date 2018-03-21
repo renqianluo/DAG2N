@@ -220,7 +220,9 @@ def _operation_to_pooling_info(operation):
   return pooling_type, pooling_shape
 
 
-def apply_operation(operation, inputs, filters, strides, activation, is_from_original_input, data_format, is_training):
+def apply_operation(operation, inputs, filters, strides, activation, 
+  cell_num, num_cells, drop_path_keep_prob,
+  is_from_original_input, data_format, is_training):
   if strides > 1 and not is_from_original_input:
     strides = 1
   input_filters = get_channel_dim(inputs.shape, data_format)
@@ -250,6 +252,9 @@ def apply_operation(operation, inputs, filters, strides, activation, is_from_ori
       inputs = batch_normalization(inputs, data_format, is_training)
   else:
     raise ValueError('Unimplemented operation', operation)
+
+  if operation != 'identity':
+    inputs = apply_drop_path(inputs, drop_path_keep_prob, cell_num, num_cells, is_training=is_training)
 
   return inputs
 
@@ -301,7 +306,44 @@ def factorized_reduction(inputs, filters, strides, activation, data_format, is_t
   return inputs
 
 
-def apply_drop_path(inputs)
+def drop_path(inputs, keep_prob, is_training=True):
+  if is_training:
+    batch_size = tf.shape(inputs)[0]
+    noise_shape = [batch_size, 1, 1, 1]
+    random_tensor = keep_prob
+    random_tensor += tf.random_uniform(noise_shape, dtype=tf.float32)
+    binary_tensor = tf.floor(random_tensor)
+    inputs = tf.div(inputs, keep_prob) * binary_tensor
+  return inputs
+
+
+def apply_drop_path(inputs, drop_path_keep_prob, cell_num, num_cells, is_training, current_step=None, use_summaries=False, drop_connection_version='v3'):
+  if drop_path_keep_prob < 1.0:
+    assert drop_connect_version in ['v1', 'v2', 'v3']
+    if drop_connect_version in ['v2', 'v3']:
+      # Scale keep prob by layer number
+      layer_ratio = (cell_num + 1) / float(num_cells)
+      if use_summaries:
+        with tf.device('/cpu:0'):
+          tf.summary.scalar('layer_ratio', layer_ratio)
+      drop_path_keep_prob = 1 - layer_ratio * (1 - drop_path_keep_prob)
+    if drop_connect_version in ['v1', 'v3']:
+      # Decrease the keep probability over time
+      if not current_step:
+        current_step = tf.cast(tf.train.get_or_create_global_step(),
+                                 tf.float32)
+      drop_path_burn_in_steps = self._total_training_steps
+      current_ratio = current_step / drop_path_burn_in_steps
+      current_ratio = tf.minimum(1.0, current_ratio)
+      if use_summaries:
+        with tf.device('/cpu:0'):
+          tf.summary.scalar('current_ratio', current_ratio)
+      drop_path_keep_prob = (1 - current_ratio * (1 - drop_path_keep_prob))
+    if use_summaries:
+      with tf.device('/cpu:0'):
+        tf.summary.scalar('drop_path_keep_prob', drop_path_keep_prob)
+    inputs = drop_path(inputs, drop_path_keep_prob, is_training=is_training)
+  return inputs
 
 
 def cell_base(last_inputs, inputs, filters, activation, data_format, is_training):
@@ -319,7 +361,7 @@ def cell_base(last_inputs, inputs, filters, activation, data_format, is_training
   return last_inputs, inputs
 
 
-def convolution_cell(last_inputs, inputs, params, is_training):
+def convolution_cell(last_inputs, inputs, params, cell_num, is_training):
   # node 1 and node 2 are last_inputs and inputs respectively
   # begin processing from node 3
   num_nodes = params['num_nodes']
@@ -327,6 +369,8 @@ def convolution_cell(last_inputs, inputs, params, is_training):
   filters = params['filters']
   dag = params['conv_dag']
   activation = params['activation']
+  num_cells = params['num_cells']
+  drop_path_keep_prob = params['drop_path_keep_prob']
 
   assert num_nodes == len(dag), 'num_nodes of convolution cell is not equal to number of nodes in convolution DAG!'
 
@@ -355,10 +399,14 @@ def convolution_cell(last_inputs, inputs, params, is_training):
       operation_1, operation_2 = node.operation_1, node.operation_2
       with tf.variable_scope('input_1'):
         is_from_original_input = int(previous_node_1.split('_')[-1]) < 3
-        h1 = apply_operation(operation_1, h1, filters, 1, activation, is_from_original_input, data_format, is_training)
+        h1 = apply_operation(operation_1, h1, filters, 1, activation, 
+          cell_num, num_cells, drop_path_keep_prob,
+          is_from_original_input, data_format, is_training)
       with tf.variable_scope('input_2'):
         is_from_original_input = int(previous_node_2.split('_')[-1]) < 3
-        h2 = apply_operation(operation_2, h2, filters, 1, activation, is_from_original_input, data_format, is_training)
+        h2 = apply_operation(operation_2, h2, filters, 1, activation, 
+          cell_num, num_cells, drop_path_keep_prob,
+          is_from_original_input, data_format, is_training)
       output = tf.identity(h1 + h2, 'output')
       h[name] = output
 
@@ -367,13 +415,16 @@ def convolution_cell(last_inputs, inputs, params, is_training):
   return curr_inputs, output
   
 
-def reduction_cell(last_inputs, inputs, params, is_training):
+def reduction_cell(last_inputs, inputs, params, cell_num, is_training):
   # node 1 and node 2 are last_inputs and inputs respectively
   # begin processing from node 3
   num_nodes = params['num_nodes']
   data_format = params['data_format']
   filters = params['filters']
   dag = params['reduc_dag']
+  activation = params['activation']
+  num_cells = params['num_cells']
+  drop_path_keep_prob = params['drop_path_keep_prob']
   
   assert num_nodes == len(dag), 'num_nodes is not equal to number of nodes in reduction DAG!'
 
@@ -401,10 +452,14 @@ def reduction_cell(last_inputs, inputs, params, is_training):
         operation_1, operation_2 = node.operation_1, node.operation_2
         with tf.variable_scope('input_1'):
           is_from_original_input = int(previous_node_1.split('_')[-1]) < 3
-          h1 = apply_operation(operation_1, h1, filters, 2, is_from_original_input, data_format, is_training)
+          h1 = apply_operation(operation_1, h1, filters, 2, activation,
+            cell_num, num_cells, drop_path_keep_prob,
+            is_from_original_input, data_format, is_training)
         with tf.variable_scope('input_2'):
           is_from_original_input = int(previous_node_2.split('_')[-1]) < 3
-          h2 = apply_operation(operation_2, h2, filters, 2, is_from_original_input, data_format, is_training)
+          h2 = apply_operation(operation_2, h2, filters, 2, activation, 
+            cell_num, num_cells, drop_path_keep_prob,
+            is_from_original_input, data_format, is_training)
         output = tf.identity(h1 + h2, 'output')
         h[name] = output
 
@@ -441,6 +496,10 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
   num_classes = params['num_classes']
   filters = params['filters']
   arch = params['arch']
+
+  if not is_training:
+    params['drop_path_keep_prob'] = 1.0
+
   if params['activation'] is None:
     params['activation'] = None
   elif params['activation'] == 'relu':
@@ -468,19 +527,22 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
 
     arch = arch.split('-')
     conv_cell_count, reduc_cell_count = 0, 0
+
+    cell_num = 0
     for cell_com in arch:
       cell, num = cell_com.split('x')
       num = int(num)
       if cell == 'conv':
         for i in xrange(conv_cell_count + 1, conv_cell_count + 1 + num):
           with tf.variable_scope('convolution_cell_%d' % i):
-            last_inputs, inputs = convolution_cell(last_inputs, inputs, params, is_training)
+            last_inputs, inputs = convolution_cell(last_inputs, inputs, params, cell_num, is_training)
+          cell_num += 1
         conv_cell_count += num
       elif cell == 'reduc':
         for i in xrange(reduc_cell_count + 1, reduc_cell_count + 1 + num):
           with tf.variable_scope('reduction_cell_%d' % i):
             params['filters'] *= 2
-            last_inputs, inputs = reduction_cell(last_inputs, inputs, params, is_training)
+            last_inputs, inputs = reduction_cell(last_inputs, inputs, params, cell_num, is_training)
         reduc_cell_count += num
      
     inputs = tf.nn.relu(inputs)
@@ -490,7 +552,7 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
     else:
       inputs = tf.reduce_mean(inputs, axis=[1,2])
       
-    #inputs = tf.reshape(inputs, [-1, inputs.shape[-1]])
+    inputs = tf.nn.dropout(inputs, params['dense_dropout_keep_prob'])
 
     with tf.variable_scope('fully_connected_layer'):
       inputs = tf.layers.dense(inputs=inputs, units=num_classes)

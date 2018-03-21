@@ -35,7 +35,10 @@ parser.add_argument('--arch', type=str, default="convx3-reducx1-convx3-reducx1-c
 parser.add_argument('--filters', type=int, default=36,
                     help='The numer of filters.')
 
-parser.add_argument('--dropout', type=float, default=0.4,
+parser.add_argument('--drop_path_keep_prob', type=float, default=0.6,
+                    help='Dropout rate.')
+
+parser.add_argument('--dense_dropout_keep_prob', type=float, default=1.0,
                     help='Dropout rate.')
 
 parser.add_argument('--train_epochs', type=int, default=310,
@@ -394,6 +397,8 @@ def main(unused_argv):
         'data_format': FLAGS.data_format,
         'batch_size': FLAGS.batch_size
         'activation': FLAGS.activation,
+        'dense_dropout_keep_prob': FLAGS.dense_dropout_keep_prob,
+        'drop_path_keep_prob': drop_path_keep_prob,
       })
 
   for _ in range(FLAGS.train_epochs // FLAGS.epochs_per_eval):
