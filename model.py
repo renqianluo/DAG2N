@@ -470,8 +470,10 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
   num_nodes = params['num_nodes']
   if not is_training:
     drop_path_keep_prob = 1.0
+    dense_dropout_keep_prob = 1.0
   else:
     drop_path_keep_prob = params['drop_path_keep_prob']
+    dense_dropout_keep_prob = params['dense_dropout_keep_prob']
   total_steps = params['total_steps']
   if params['activation'] is None:
     activation = None
@@ -541,7 +543,7 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
     else:
       inputs = tf.reduce_mean(inputs, axis=[1,2])
       
-    inputs = tf.nn.dropout(inputs, params['dense_dropout_keep_prob'])
+    inputs = tf.nn.dropout(inputs, dense_dropout_keep_prob)
 
     with tf.variable_scope('fully_connected_layer'):
       inputs = tf.layers.dense(inputs=inputs, units=num_classes)
