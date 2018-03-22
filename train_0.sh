@@ -9,9 +9,9 @@ mkdir -p $LOG_DIR
 nohup python main_es.py \
   --data_dir=data \
   --model_dir=$MODEL_DIR \
-  --train_epochs=610 \
+  --train_epochs=630 \
   --num_nodes=7 \
-  --filters=36 \
+  --filters=48 \
   --batch_size=128 \
   --epochs_per_eval=5 \
   --lr_schedule=cosine >$LOG_DIR/train.$2.log 2>&1 &

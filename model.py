@@ -97,10 +97,6 @@ def _separable_conv2d(operation, inputs, filters, strides, activation, data_form
 
 
 def _conv2d(operation, inputs, filters, strides, activation, data_format, is_training):
-  filters = params['filters']
-  activation = params['activation']
-  data_format = params['data_format']
-
   kernel_size, num_layers = _operation_to_info(operation)
   for layer_num in range(num_layers - 1):
     inputs = tf.nn.relu(inputs) 
@@ -169,10 +165,7 @@ def _operation_to_pooling_info(operation):
   return pooling_type, pooling_shape
 
 
-def factorized_reduction(inputs, filters, strides, params, is_training):
-  activation = params['activation']
-  data_format = params['data_format']
-
+def factorized_reduction(inputs, filters, strides, activation, data_format, is_training):
   assert filters % 2 == 0, (
     'Need even number of filters when using this factorized reduction')
   if strides == 1:
@@ -233,21 +226,21 @@ def drop_path(inputs, keep_prob, is_training=True):
 class ENASCell(object):
   def __init__(self, filters, dag, num_nodes, drop_path_keep_prob, num_cells,
     total_steps,activation, data_format, is_training):
-  self._filters = filters
-  self._dag = dag
-  self._num_nodes = num_nodes
-  self._drop_path_keep_prob = drop_path_keep_prob
-  self._num_cells = num_cells
-  self._total_steps = total_steps
-  self._is_training = is_training
-  self._data_format = data_format
-  self._activation = activation
+    self._filters = filters
+    self._dag = dag
+    self._num_nodes = num_nodes
+    self._drop_path_keep_prob = drop_path_keep_prob
+    self._num_cells = num_cells
+    self._total_steps = total_steps
+    self._is_training = is_training
+    self._data_format = data_format
+    self._activation = activation
 
   def _reduce_prev_layer(self, prev_layer, curr_layer):
     if prev_layer is None:
       return curr_layer
 
-    curr_num_filters = self._filters
+    curr_num_filters = self._filter_size
     data_format = self._data_format
     activation = self._activation
     is_training = self._is_training
@@ -257,7 +250,7 @@ class ENASCell(object):
     prev_filter_shape = int(prev_layer.shape[2])
     if curr_filter_shape != prev_filter_shape:
       prev_layer = tf.nn.relu(prev_layer)
-      prev_layer = factorized_reduction(prev_layer, curr_num_filters, 2, is_training)
+      prev_layer = factorized_reduction(prev_layer, curr_num_filters, 2, activation, data_format, is_training)
     elif curr_num_filters != prev_num_filters:
       prev_layer = tf.nn.relu(prev_layer)
       prev_layer = tf.layers.conv2d(
@@ -271,9 +264,10 @@ class ENASCell(object):
 
 
   def _cell_base(self, last_inputs, inputs):
-    filters = self._filters
+    filters = self._filter_size
     activation = self._activation
     data_format = self._data_format
+    is_training = self._is_training
 
     with tf.variable_scope('transforme_last_inputs'):
       last_inputs = self._reduce_prev_layer(last_inputs, inputs)
@@ -293,7 +287,7 @@ class ENASCell(object):
 
   def __call__(self, inputs, filter_scaling=1, strides=1,
     last_inputs=None, cell_num=-1):
-    self._cell_numm = cell_num
+    self._cell_num = cell_num
     self._filter_scaling = filter_scaling
     self._filter_size = int(self._filters * filter_scaling)
     num_nodes = self._num_nodes
@@ -323,18 +317,18 @@ class ENASCell(object):
           continue
         previous_node_1, previous_node_2 = node.previous_node_1, node.previous_node_2
         h1, h2 = h[previous_node_1], h[previous_node_2]
-        if previous_node_1 in leaf_nodes:
+        if previous_node_1 in loose_nodes:
           loose_nodes.remove(previous_node_1)
-        if previous_node_2 in leaf_nodes:
+        if previous_node_2 in loose_nodes:
           loose_nodes.remove(previous_node_2)
         operation_1, operation_2 = node.operation_1, node.operation_2
         with tf.variable_scope('input_1'):
           is_from_original_input = int(previous_node_1.split('_')[-1]) < 3
-          h1 = apply_operation(operation_1, h1, strides, is_from_original_input)
+          h1 = self._apply_operation(operation_1, h1, strides, is_from_original_input)
         with tf.variable_scope('input_2'):
           is_from_original_input = int(previous_node_2.split('_')[-1]) < 3
-          h2 = apply_operation(operation_2, h2, strides, is_from_original_input)
-        with tf.variable_scope('combine')
+          h2 = self._apply_operation(operation_2, h2, strides, is_from_original_input)
+        with tf.variable_scope('combine'):
           output = h1 + h2
         h[name] = output
 
@@ -361,40 +355,48 @@ class ENASCell(object):
     elif 'identity' in operation:
       if strides > 1 or (input_filters != filters):
         inputs = tf.nn.relu(inputs)
-        inputs = tf.layers.conv2d(
-          inputs=inputs, filters=filters, kernel_size=1, 
-          strides=strides, padding='SAME',
-          kernel_initializer=tf.variance_scaling_initializer(),
-          data_format=data_format,
-          activation=activation)
-        inputs = batch_normalization(inputs, data_format, is_training)
+        with tf.variable_scope('1x1'):
+          inputs = tf.layers.conv2d(
+            inputs=inputs, filters=filters, kernel_size=1, 
+            strides=strides, padding='SAME',
+            kernel_initializer=tf.variance_scaling_initializer(),
+            data_format=data_format,
+            activation=activation)
+        with tf.variable_scope('bn_1'):
+          inputs = batch_normalization(inputs, data_format, is_training)
     elif 'pool' in operation:
       inputs = _pooling(operation, inputs, strides, data_format)
       if input_filters != filters:
-        inputs = tf.layers.conv2d(
-          inputs=inputs, filters=filters, kernel_size=1, 
-          strides=1, padding='SAME',
-          kernel_initializer=tf.variance_scaling_initializer(),
-          data_format=data_format,
-          activation=activation)
-        inputs = batch_normalization(inputs, data_format, is_training)
+        with tf.variable_scope('1x1'):
+          inputs = tf.layers.conv2d(
+            inputs=inputs, filters=filters, kernel_size=1, 
+            strides=1, padding='SAME',
+            kernel_initializer=tf.variance_scaling_initializer(),
+            data_format=data_format,
+            activation=activation)
+        with tf.variable_scope('bn_1'):
+          inputs = batch_normalization(inputs, data_format, is_training)
     else:
       raise ValueError('Unimplemented operation', operation)
 
     if operation != 'identity':
-      inputs = self._apply_drop_path(inputs, params, is_training=is_training)
+      inputs = self._apply_drop_path(inputs, is_training)
 
     return inputs
 
 
   def _combine_unused_states(self, h, loose_nodes):
+    activation = self._activation
+    data_format = self._data_format
+    is_training = self._is_training
+
     final_height = int(h['node_%d'%self._num_nodes].shape[2])
-    final_filters = get_channel_dim(h['node_%d'%self._num_nodes].shape)
+    final_filters = get_channel_dim(h['node_%d'%self._num_nodes].shape, self._data_format)
 
     for i in range(1, self._num_nodes+1):
       node_name = 'node_%d'%i
       curr_height = int(h[node_name].shape[2])
-      curr_filters = get_channel_dim(h[node_name].shape)
+      curr_filters = get_channel_dim(h[node_name].shape, data_format)
 
       # Determine if a reduction should be applied to make the number of filters match.
       should_reduce = final_filters != curr_filters
@@ -403,13 +405,13 @@ class ENASCell(object):
       if should_reduce:
         strides = 2 if final_height != curr_height else 1
         with tf.variable_scope('reduction_{}'.format(i)):
-          h[node_name] = factorized_reduction(h[node_name], final_filters, strides)
+          h[node_name] = factorized_reduction(h[node_name], final_filters, strides, activation, data_format, is_training)
 
     with tf.variable_scope('concat_loose_ends'):
-      output = tf.concat([h[name] for name in loose_nodes], axis=get_channel_index(self._data_format))
+      output = tf.concat([h[name] for name in loose_nodes], axis=get_channel_index(data_format))
     return output
 
-  def _apply_drop_path(self, inputs, current_step=None, use_summaries=False, drop_connect_version='v3'):
+  def _apply_drop_path(self, inputs, is_training, current_step=None, use_summaries=False, drop_connect_version='v3'):
     drop_path_keep_prob = self._drop_path_keep_prob
     if drop_path_keep_prob < 1.0:
       assert drop_connect_version in ['v1', 'v2', 'v3']
@@ -417,7 +419,7 @@ class ENASCell(object):
         # Scale keep prob by layer number
         assert self._cell_num != -1
         num_cells = self._num_cells
-        layer_ratio = (cell_num + 1) / float(num_cells)
+        layer_ratio = (self._cell_num + 1) / float(num_cells)
         if use_summaries:
           with tf.device('/cpu:0'):
             tf.summary.scalar('layer_ratio', layer_ratio)
@@ -437,7 +439,7 @@ class ENASCell(object):
       if use_summaries:
         with tf.device('/cpu:0'):
           tf.summary.scalar('drop_path_keep_prob', drop_path_keep_prob)
-      inputs = drop_path(inputs, drop_path_keep_prob, is_training=is_training)
+      inputs = drop_path(inputs, drop_path_keep_prob, is_training)
     return inputs
 
 
@@ -521,7 +523,7 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
       if cell == 'conv':
         for i in xrange(conv_cell_count + 1, conv_cell_count + 1 + num):
           with tf.variable_scope('convolution_cell_%d' % i):
-            last_inputs, inputs = convolution_cell(inputs, 1, 1, last_inputs, cell_num)
+            last_inputs, inputs = convolution_cell(inputs, filter_scaling, 1, last_inputs, cell_num)
           cell_num += 1
         conv_cell_count += num
       elif cell == 'reduc':
