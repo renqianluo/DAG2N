@@ -15,9 +15,9 @@ nohup python main_es.py \
   --num_nodes=7 \
   --drop_path_keep_prob=0.7 \
   --batch_size=32 \
-  --epochs_per_eval=5 \
-  --l_max=0.2 \
-  --l_min=0.0 \
+  --epochs_per_eval=10 \
+  --lr_max=0.024 \
+  --lr_min=0.0 \
   --T_0=600 \
   --dag='AmoebaNet_B' \
   --lr_schedule=cosine >$LOG_DIR/train.$MODEL.log 2>&1 &

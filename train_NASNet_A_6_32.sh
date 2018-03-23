@@ -14,10 +14,10 @@ nohup python main_es.py \
   --filters=32 \
   --num_nodes=7 \
   --drop_path_keep_prob=0.6 \
-  --batch_size=128 \
+  --batch_size=32 \
   --epochs_per_eval=5 \
-  --l_max=0.2 \
-  --l_min=0.0 \
+  --lr_max=0.025 \
+  --lr_min=0.0 \
   --T_0=600 \
   --dag='NASNet_A' \
   --lr_schedule=cosine >$LOG_DIR/train.$MODEL.log 2>&1 &

@@ -16,8 +16,8 @@ nohup python main_es.py \
   --drop_path_keep_prob=0.6 \
   --batch_size=128 \
   --epochs_per_eval=5 \
-  --l_max=0.05 \
-  --l_min=0.001 \
+  --lr_max=0.05 \
+  --lr_min=0.001 \
   --T_0=10 \
   --dag='ENAS' \
   --lr_schedule=cosine >$LOG_DIR/train.$MODEL.log 2>&1 &
