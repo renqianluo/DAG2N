@@ -15,7 +15,7 @@ import math
 import time
 import datetime
 import model
-#import model_new as model
+import dag
 
 parser = argparse.ArgumentParser()
 
@@ -29,8 +29,8 @@ parser.add_argument('--model_dir', type=str, default='/tmp/cifar10_model',
 parser.add_argument('--num_nodes', type=int, default=7,
                     help='The number of nodes in a cell.')
 
-parser.add_argument('--arch', type=str, default="convx3-reducx1-convx3-reducx1-convx3",
-                    help='The architecture of the network.')
+parser.add_argument('--N', type=int, default=6,
+                    help='The number of stacked convolution cell.')
 
 parser.add_argument('--filters', type=int, default=36,
                     help='The numer of filters.')
@@ -53,8 +53,9 @@ parser.add_argument('--batch_size', type=int, default=128,
 parser.add_argument('--random_sample', type=bool, default=False,
                     help='Random sample a structure and hyper to run.')
 
-parser.add_argument('--dag', type=int, default=0,
-                    help='Dag to run.')
+parser.add_argument('--dag', type=str, default=None,
+                    choices=['ENAS', 'NASNet_A', 'AmoebaNet_A', 'AmoebaNet_B'],
+                    help='Default dag to run.')
 
 parser.add_argument('--split_train_valid', type=bool, default=False,
                     help='Split training data to train set and valid set.')
@@ -77,10 +78,10 @@ parser.add_argument('--lr_schedule', type=str, default='cosine',
 parser.add_argument('--lr', type=float, default='0.1',
                     help='Learning rate when learning rate schedule is constant.')
 
-parser.add_argument('--lr_max', type=float, default=0.05,
+parser.add_argument('--lr_max', type=float, default=0.2,  #0.05 in ENAS
                     help='Max learning rate.')
 
-parser.add_argument('--lr_min', type=float, default=0.001,
+parser.add_argument('--lr_min', type=float, default=0.0, #0.001 in ENAS
                     help='Min learning rate.')
 
 parser.add_argument('--T_0', type=int, default=10,
@@ -365,66 +366,32 @@ def get_dag(num_nodes, cell='conv_dag'):
   return dag
 
 
-def build_dag(random_sample):
+def build_dag(random_sample, name):
   if random_sample:
     conv_dag = get_dag(FLAGS.num_nodes, 'conv_dag')
     reduc_dag = get_dag(FLAGS.num_nodes, 'reduc_dag') 
   else:
-    if FLAGS.dag == 0:
-      conv_dag = OrderedDict()
-      conv_dag['node_1'] = model.Node('node_1', None, None, None, None)
-      conv_dag['node_2'] = model.Node('node_2', None, None, None, None)
-      conv_dag['node_3'] = model.Node('node_3', 'node_2', 'node_2', 'sep_conv 3x3', 'identity')
-      conv_dag['node_4'] = model.Node('node_4', 'node_2', 'node_1', 'sep_conv 5x5', 'identity')
-      conv_dag['node_5'] = model.Node('node_5', 'node_1', 'node_2', 'avg_pool 3x3', 'sep_conv 3x3')
-      conv_dag['node_6'] = model.Node('node_6', 'node_1', 'node_2', 'sep_conv 3x3', 'avg_pool 3x3')
-      conv_dag['node_7'] = model.Node('node_7', 'node_2', 'node_1', 'sep_conv 5x5', 'avg_pool 3x3')
+    if name == 'ENAS':
+      conv_dag, reduc_dag = dag.ENAS()
+    elif name == 'NASNet_A':
+      conv_dag, reduc_dag = dag.NASNet_A()
+    elif name == 'AmoebaNet_A':
+      conv_dag, reduc_dag = dag.AmoebaNet_A()
+    elif name == 'AmoebaNet_B':
+      conv_dag, reduc_dag = dag.AmoebaNet_B()
 
-      reduc_dag = OrderedDict()
-      reduc_dag['node_1'] = model.Node('node_1', None, None, None, None)
-      reduc_dag['node_2'] = model.Node('node_2', None, None, None, None)
-      reduc_dag['node_3'] = model.Node('node_3', 'node_1', 'node_2', 'sep_conv 5x5', 'avg_pool 3x3')
-      reduc_dag['node_4'] = model.Node('node_4', 'node_2', 'node_2', 'sep_conv 3x3', 'avg_pool 3x3')
-      reduc_dag['node_5'] = model.Node('node_5', 'node_2', 'node_2', 'avg_pool 3x3', 'sep_conv 3x3')
-      reduc_dag['node_6'] = model.Node('node_6', 'node_5', 'node_2', 'sep_conv 5x5', 'avg_pool 3x3')
-      reduc_dag['node_7'] = model.Node('node_7', 'node_6', 'node_1', 'sep_conv 3x3', 'sep_conv 5x5')
-    else:
-      conv_dag = OrderedDict()
-      conv_dag['node_1'] = model.Node('node_1', None, None, None, None)
-      conv_dag['node_2'] = model.Node('node_2', None, None, None, None)
-      conv_dag['node_3'] = model.Node('node_3', 'node_2', 'node_2', 'conv 3x3', 'identity')
-      conv_dag['node_4'] = model.Node('node_4', 'node_2', 'node_1', 'conv 5x5', 'identity')
-      conv_dag['node_5'] = model.Node('node_5', 'node_1', 'node_2', 'avg_pool 3x3', 'conv 3x3')
-      conv_dag['node_6'] = model.Node('node_6', 'node_1', 'node_2', 'conv 3x3', 'avg_pool 3x3')
-      conv_dag['node_7'] = model.Node('node_7', 'node_2', 'node_1', 'conv 5x5', 'avg_pool 3x3')
-
-      reduc_dag = OrderedDict()
-      reduc_dag['node_1'] = model.Node('node_1', None, None, None, None)
-      reduc_dag['node_2'] = model.Node('node_2', None, None, None, None)
-      reduc_dag['node_3'] = model.Node('node_3', 'node_1', 'node_2', 'conv 5x5', 'avg_pool 3x3')
-      reduc_dag['node_4'] = model.Node('node_4', 'node_2', 'node_2', 'conv 3x3', 'avg_pool 3x3')
-      reduc_dag['node_5'] = model.Node('node_5', 'node_2', 'node_2', 'avg_pool 3x3', 'conv 3x3')
-      reduc_dag['node_6'] = model.Node('node_6', 'node_5', 'node_2', 'conv 5x5', 'avg_pool 3x3')
-      reduc_dag['node_7'] = model.Node('node_7', 'node_6', 'node_1', 'conv 3x3', 'conv 5x5')
-
-
-  with open(os.path.join(FLAGS.model_dir, 'model_dag.json'), 'w') as f:
-    dag = OrderedDict()
-    dag['conv_dag'] = conv_dag
-    dag['reduc_dag'] = reduc_dag
-    json.dump(dag, f)
   return conv_dag, reduc_dag
 
 
 def get_params(random_sample):
   if random_sample:
     drop_path_keep_prob = random.sample([0.5, 0.6, 0.7], 1)
-    filters = random.sample([36, , ], 1)
+    filters = random.sample([36, 80, 128], 1)
   else:
     drop_path_keep_prob = FLAGS.drop_path_keep_prob
     filters = FLAGS.filters
   
-  conv_dag, reduc_dag = build_dag(random_sample)
+  conv_dag, reduc_dag = build_dag(random_sample, FLAGS.dag)
   
   if FLAGS.split_train_valid:
     total_steps = int(FLAGS.train_epochs * _NUM_IMAGES['train'] / float(FLAGS.batch_size))
@@ -432,7 +399,7 @@ def get_params(random_sample):
     total_steps = int(FLAGS.train_epochs * (_NUM_IMAGES['train'] + _NUM_IMAGES['valid']) / float(FLAGS.batch_size))
   
   params={
-    'arch': FLAGS.arch,
+    'N': FLAGS.N,
     'num_nodes': FLAGS.num_nodes,
     'num_classes': _NUM_CLASSES,
     'filters': filters,
@@ -444,7 +411,15 @@ def get_params(random_sample):
     'dense_dropout_keep_prob': FLAGS.dense_dropout_keep_prob,
     'drop_path_keep_prob': drop_path_keep_prob,
     'total_steps': total_steps,
-    'split':FLAGS.split_train_valid,
+    'split': FLAGS.split_train_valid,
+    'train_epochs': FLAGS.train_epochs,
+    'epochs_per_eval' : FLAGS.epochs_per_eval,
+    'dag': FLAGS.dag,
+    'lr_schedule' : FLAGS.lr_schedule,
+    'lr_max' : FLAGS.lr_max,
+    'lr_min' : FLAGS.lr_min,
+    'T_0' : FLAGS.T_0,
+    'T_mul' : FLAGS.T_mul,
   }
   return params
 
@@ -454,6 +429,9 @@ def main(unused_argv):
   os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 
   params = get_params(FLAGS.random_sample)
+
+  with open(os.path.join(FLAGS.model_dir, 'hparams.json'), 'w') as f:
+    json.dump(params, f)
 
   # Set up a RunConfig to only save checkpoints once per training cycle.
   run_config = tf.estimator.RunConfig().replace(save_checkpoints_secs=1e9)
@@ -475,10 +453,11 @@ def main(unused_argv):
             FLAGS.split_train_valid, 'train', FLAGS.data_dir, FLAGS.batch_size, FLAGS.epochs_per_eval),
         hooks=[logging_hook])
 
-    # Valid the model and print results
-    eval_results = cifar_classifier.evaluate(
-        input_fn=lambda: input_fn(FLAGS.split_train_valid, 'valid', FLAGS.data_dir, FLAGS.batch_size))
-    print(eval_results)
+    if not FLAGS.split_train_valid:
+      # Valid the model and print results
+      eval_results = cifar_classifier.evaluate(
+          input_fn=lambda: input_fn(FLAGS.split_train_valid, 'valid', FLAGS.data_dir, FLAGS.batch_size))
+      print(eval_results)
     
     # Evaluate the model and print results
     eval_results = cifar_classifier.evaluate(

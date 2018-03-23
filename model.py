@@ -11,12 +11,27 @@ _BATCH_NORM_EPSILON = 1e-5
 
 _OPERATIONS=[
   'identity',
-  'sep_conv 5x5',
   'sep_conv 3x3',
+  'sep_conv 5x5',
+  'sep_conv 7x7',
+  'avg_pool 2x2',
   'avg_pool 3x3',
+  'avg_pool 5x5',
+  'max_pool 2x2',
   'max_pool 3x3',
-  'conv 5x5',
-  'conv 3x3'
+  'max_pool 5x5',
+  'max_pool 7x7',
+  'min_pool 2x2',
+  'conv 1x1',
+  'conv 3x3',
+  'conv 1x3+3x1',
+  'conv 1x7+7x1',
+  'dil_sep_conv 3x3',
+  'dil_sep_conv 5x5',
+  'dil_sep_conv 7x7',
+  'dil_conv 3x3 2',
+  'dil_conv 3x3 4',
+  'dil_conv 3x3 6',
 ]
 
 Node = namedtuple('Node', ['name', 'previous_node_1', 'previous_node_2', 'operation_1', 'operation_2'])
@@ -50,38 +65,25 @@ def _pooling(operation, inputs, strides, data_format):
   if pooling_type == 'avg_pool':
     inputs = tf.layers.average_pooling2d(
       inputs=inputs, pool_size=pooling_size, strides=strides,
-      padding='SAME',
-    data_format=data_format)
+      padding='SAME', data_format=data_format)
   elif pooling_type == 'max_pool':
     inputs = tf.layers.max_pooling2d(
       inputs=inputs, pool_size=pooling_size, strides=strides,
-      padding='SAME',
-      data_format=data_format)
+      padding='SAME', data_format=data_format)
+  elif pooling_type == 'min_pool':
+    inputs = -tf.layers.max_pooling2d(
+      inputs=-inputs, pool_size=pooling_size, strides=strides,
+      padding='SAME', data_format=data_format)
   else:
     raise NotImplementedError('Unimplemented pooling type: ', pooling_type)
   return inputs
 
 
 def _separable_conv2d(operation, inputs, filters, strides, activation, data_format, is_training):
-  kernel_size, num_layers = _operation_to_info(operation)
+  kernel_size, _ = _operation_to_info(operation)
 
-  for layer_num in range(num_layers - 1):
-    inputs = tf.nn.relu(inputs) 
-    with tf.variable_scope('separable_conv_{0}x{0}_{1}'.format(kernel_size, layer_num+1)):
-      inputs = tf.layers.separable_conv2d(
-        inputs=inputs, filters=filters, kernel_size=kernel_size, 
-        strides=strides, depth_multiplier=1,
-        padding='SAME',
-        depthwise_initializer=tf.variance_scaling_initializer(),
-        pointwise_initializer=tf.variance_scaling_initializer(),
-        data_format=data_format,
-        activation=activation)
-    with tf.variable_scope('bn_sep_{0}x{0}_{1}'.format(kernel_size, layer_num+1)):
-      inputs = batch_normalization(inputs, data_format, is_training)
-    strides = 1
-
-  inputs = tf.nn.relu(inputs)
-  with tf.variable_scope('separable_conv_{0}x{0}_{1}'.format(kernel_size, num_layers)):
+  inputs = tf.nn.relu(inputs) 
+  with tf.variable_scope('separable_conv_{0}x{0}_{1}'.format(kernel_size, 1)):
     inputs = tf.layers.separable_conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
       strides=strides, depth_multiplier=1,
@@ -90,46 +92,139 @@ def _separable_conv2d(operation, inputs, filters, strides, activation, data_form
       pointwise_initializer=tf.variance_scaling_initializer(),
       data_format=data_format,
       activation=activation)
-  with tf.variable_scope('bn_sep_{0}x{0}_{1}'.format(kernel_size, num_layers)):
+  with tf.variable_scope('bn_sep_{0}x{0}_{1}'.format(kernel_size, 1)):
+    inputs = batch_normalization(inputs, data_format, is_training)
+  strides = 1
+
+  inputs = tf.nn.relu(inputs)
+  with tf.variable_scope('separable_conv_{0}x{0}_{1}'.format(kernel_size, 2)):
+    inputs = tf.layers.separable_conv2d(
+      inputs=inputs, filters=filters, kernel_size=kernel_size, 
+      strides=strides, depth_multiplier=1,
+      padding='SAME',
+      depthwise_initializer=tf.variance_scaling_initializer(),
+      pointwise_initializer=tf.variance_scaling_initializer(),
+      data_format=data_format,
+      activation=activation)
+  with tf.variable_scope('bn_sep_{0}x{0}_{1}'.format(kernel_size, 2)):
+    inputs = batch_normalization(inputs, data_format, is_training)
+
+  return inputs
+
+
+def _dil_separable_conv2d(operation, inputs, filters, strides, activation, data_format, is_training):
+  kernel_size, dilation_rate = _operation_to_info(operation)
+
+  if not dilation_rate:
+    dilation_rate = 2
+
+  inputs = tf.nn.relu(inputs) 
+  with tf.variable_scope('dil_separable_conv_{0}x{0}_{1}'.format(kernel_size, 1)):
+    inputs = tf.layers.separable_conv2d(
+      inputs=inputs, filters=filters, kernel_size=kernel_size, 
+      strides=strides, depth_multiplier=1,
+      padding='SAME',
+      dilation_rate=dilation_rate,
+      depthwise_initializer=tf.variance_scaling_initializer(),
+      pointwise_initializer=tf.variance_scaling_initializer(),
+      data_format=data_format,
+      activation=activation)
+  with tf.variable_scope('bn_dil_sep_{0}x{0}_{1}'.format(kernel_size, 1)):
+    inputs = batch_normalization(inputs, data_format, is_training)
+  strides = 1
+
+  inputs = tf.nn.relu(inputs)
+  with tf.variable_scope('dil_separable_conv_{0}x{0}_{1}'.format(kernel_size, 2)):
+    inputs = tf.layers.separable_conv2d(
+      inputs=inputs, filters=filters, kernel_size=kernel_size, 
+      strides=strides, depth_multiplier=1,
+      padding='SAME',
+      dilation_rate=dilation_rate,
+      depthwise_initializer=tf.variance_scaling_initializer(),
+      pointwise_initializer=tf.variance_scaling_initializer(),
+      data_format=data_format,
+      activation=activation)
+  with tf.variable_scope('bn_dil_sep_{0}x{0}_{1}'.format(kernel_size, 2)):
     inputs = batch_normalization(inputs, data_format, is_training)
 
   return inputs
 
 
 def _conv2d(operation, inputs, filters, strides, activation, data_format, is_training):
-  kernel_size, num_layers = _operation_to_info(operation)
-  for layer_num in range(num_layers - 1):
-    inputs = tf.nn.relu(inputs) 
-    with tf.variable_scope('conv_{0}x{0}_{1}'.format(kernel_size, layer_num+1)):
+  kernel_size, _ = _operation_to_info(operation)
+  if len(kernel_size) == 1:
+    inputs = tf.nn.relu(inputs)
+    with tf.variable_scope('conv_{0}x{0}_{1}'.format(kernel_size, 1)):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=filters, kernel_size=kernel_size, 
         strides=strides, padding='SAME',
         kernel_initializer=tf.variance_scaling_initializer(),
         data_format=data_format,
         activation=activation)
-    with tf.variable_scope('bn_conv_{0}x{0}_{1}'.format(kernel_size, layer_num+1)):
+    with tf.variable_scope('bn_conv_{0}x{0}_{1}'.format(kernel_size, 1)):
+      inputs = batch_normalization(inputs, data_format, is_training)
+    return inputs
+  else:
+    kernel_size1 = kernel_size[0]
+    inputs = tf.nn.relu(inputs) 
+    with tf.variable_scope('conv_{0}x{1}_{2}'.format(kernel_size1[0], kernel_size1[1], 1)):
+      inputs = tf.layers.conv2d(
+        inputs=inputs, filters=filters, kernel_size=kernel_size1, 
+        strides=strides, padding='SAME',
+        kernel_initializer=tf.variance_scaling_initializer(),
+        data_format=data_format,
+        activation=activation)
+    with tf.variable_scope('bn_conv_{0}x{1}_{2}'.format(kernel_size1[0], kernel_size1[1], 1)):
       inputs = batch_normalization(inputs, data_format, is_training)
     strides = 1
 
-  inputs = tf.nn.relu(inputs)
-  with tf.variable_scope('conv_{0}x{0}_{1}'.format(kernel_size, num_layers)):
+    kernel_size2 = kernel_size[1]
+    inputs = tf.nn.relu(inputs) 
+    with tf.variable_scope('conv_{0}x{1}_{2}'.format(kernel_size2[0], kernel_size2[1], 2)):
+      inputs = tf.layers.conv2d(
+        inputs=inputs, filters=filters, kernel_size=kernel_size2, 
+        strides=strides, padding='SAME',
+        kernel_initializer=tf.variance_scaling_initializer(),
+        data_format=data_format,
+        activation=activation)
+    with tf.variable_scope('bn_conv_{0}x{1}_{2}'.format(kernel_size2[0], kernel_size2[1], 2)):
+      inputs = batch_normalization(inputs, data_format, is_training)
+    return inputs
+
+
+def _dil_conv2d(operation, inputs, filters, strides, activation, data_format, is_training):
+  kernel_size, dilation_rate = _operation_to_info(operation)
+  inputs = tf.nn.relu(inputs) 
+  with tf.variable_scope('dil_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 1)):
     inputs = tf.layers.conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
       strides=strides, padding='SAME',
+      dilation_rate=dilation_rate,
       kernel_initializer=tf.variance_scaling_initializer(),
       data_format=data_format,
       activation=activation)
-  with tf.variable_scope('bn_conv_{0}x{0}_{1}'.format(kernel_size, num_layers)):
+  with tf.variable_scope('bn_dil_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 1)):
     inputs = batch_normalization(inputs, data_format, is_training)
+  
   return inputs
 
 
 def _operation_to_filter_shape(operation):
-  splitted_operation = operation.split('x')
-  filter_shape = int(splitted_operation[0][-1])
-  assert filter_shape == int(
-      splitted_operation[1][0]), 'Rectangular filters not supported.'
-  return filter_shape
+  if '+' in operation:
+    filter_shapes = operation.split('+')
+    filter_shape = []
+    for fs in filter_shapes:
+      filter_height_width = e.split('x')
+      filter_height = int(filter_height_width[0])
+      filter_width = int(filter_height_width[1])
+      filter_shape.append((filter_height, filter_width))
+    return filter_shape
+  else:
+    filter_height_width = operation.split('x')
+    filter_shape = int(filter_height_width[0])
+    assert filter_shape == int(
+        filter_height_width[1]), 'Rectangular filters not supported.'
+    return filter_shape
 
 
 def _operation_to_num_layers(operation):
@@ -139,10 +234,18 @@ def _operation_to_num_layers(operation):
   return int(splitted_operation[-1])
 
 
+def _operation_to_dilation_rate(operation):
+  return int(operation)
+
+
 def _operation_to_info(operation):
-  num_layers = 2
-  filter_shape = _operation_to_filter_shape(operation)
-  return filter_shape, num_layers
+  operation = operation.split(' ')
+  filter_shape = _operation_to_filter_shape(operation[1])
+  if len(operation) == 3:
+    dilation_rate = _operation_to_dilation_rate(operation[2])
+  else:
+    dilation_rate = None
+  return filter_shape, dilation_rate
 
 
 def _operation_to_pooling_type(operation):
@@ -348,7 +451,11 @@ class ENASCell(object):
     if strides > 1 and not is_from_original_input:
       strides = 1
     input_filters = get_channel_dim(inputs.shape, data_format)
-    if 'sep_conv' in operation:
+    if 'dil_sep_conv' in operation:
+      inputs = _dil_separable_conv2d(operation, inputs, filters, strides, activation, data_format, is_training)
+    elif 'dil_conv' in operation:
+      inputs = _dil_conv2d(operation, inputs, filters, strides, activation, data_format, is_training)
+    elif 'sep_conv' in operation:
       inputs = _separable_conv2d(operation, inputs, filters, strides, activation, data_format, is_training)
     elif 'conv' in operation:
       inputs = _conv2d(operation, inputs, filters, strides, activation, data_format, is_training)
@@ -466,7 +573,7 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
   filters = params['filters']
   conv_dag = params['conv_dag']
   reduc_dag = params['reduc_dag']
-  arch = params['arch']
+  N = params['N']
   num_nodes = params['num_nodes']
   if not is_training:
     drop_path_keep_prob = 1.0
@@ -492,17 +599,19 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
     # https://www.tensorflow.org/performance/performance_guide#data_formats
     inputs = tf.transpose(inputs, [0, 3, 1, 2])
  
-  arch = arch.split('-')
-  num_cells = 0
-  for e in arch:
-    _, num = e.split('x')
-    num = int(num)
-    num_cells += num
+  num_cells = N * 3
+  total_num_cells = num_cells + 2
 
-  convolution_cell = ENASCell(filters, conv_dag, num_nodes, drop_path_keep_prob, num_cells,
+  convolution_cell = ENASCell(filters, conv_dag, num_nodes, drop_path_keep_prob, total_num_cells,
     total_steps,activation, data_format, is_training)
-  reduction_cell = ENASCell(filters, reduc_dag, num_nodes, drop_path_keep_prob, num_cells,
+  reduction_cell = ENASCell(filters, reduc_dag, num_nodes, drop_path_keep_prob, total_num_cells,
     total_steps,activation, data_format, is_training)
+
+  reduction_layers = []
+  for pool_num in range(1, 3):
+    layer_num = (float(pool_num) / (2 + 1)) * num_cells
+    layer_num = int(layer_num)
+    reduction_layers.append(layer_num)
 
   with tf.variable_scope('body', reuse=reuse):
     last_inputs = None
@@ -516,25 +625,18 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
     with tf.variable_scope('bn'):
       inputs = batch_normalization(inputs, data_format, is_training)
 
-    conv_cell_count, reduc_cell_count, filter_scaling = 0, 0, 1
+    true_cell_num, filter_scaling = 0, 1
 
-    cell_num = 0
-    for cell_com in arch:
-      cell, num = cell_com.split('x')
-      num = int(num)
-      if cell == 'conv':
-        for i in xrange(conv_cell_count + 1, conv_cell_count + 1 + num):
-          with tf.variable_scope('convolution_cell_%d' % i):
-            last_inputs, inputs = convolution_cell(inputs, filter_scaling, 1, last_inputs, cell_num)
-          cell_num += 1
-        conv_cell_count += num
-      elif cell == 'reduc':
-        for i in xrange(reduc_cell_count + 1, reduc_cell_count + 1 + num):
-          with tf.variable_scope('reduction_cell_%d' % i):
-            filter_scaling *= 2
-            last_inputs, inputs = reduction_cell(inputs, filter_scaling, 2, last_inputs, cell_num)
-          cell_num += 1
-        reduc_cell_count += num
+    for cell_num in range(num_cells):
+      strides = 1
+      if cell_num in reduction_layers:
+        filter_scaling *= 2
+        with tf.variable_scope('reduction_cell_%d' % (reduction_layers.index(cell_num)+1)):
+          last_inputs, inputs = reduction_cell(inputs, filter_scaling, 2, last_inputs, true_cell_num)
+        true_cell_num += 1
+      with tf.variable_scope('convolution_cell_%d' % cell_num):
+        last_inputs, inputs = convolution_cell(inputs, filter_scaling, strides, last_inputs, true_cell_num)
+      true_cell_num += 1
      
     inputs = tf.nn.relu(inputs)
         
