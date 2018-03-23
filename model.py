@@ -591,6 +591,7 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
   if params['data_format'] is None:
     data_format = 'channels_first' if tf.test.is_built_with_cuda() else 'channels_last'
   num_classes = params['num_classes']
+  stem_multiplier = params['stem_multiplier']
 
   
   if data_format == 'channels_first':
@@ -617,7 +618,7 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
     last_inputs = None
     with tf.variable_scope('stem_conv_3x3'):
       inputs = tf.layers.conv2d(
-        inputs=inputs, filters=filters, kernel_size=3, strides=1,
+        inputs=inputs, filters=int(filters*stem_multiplier), kernel_size=3, strides=1,
         padding='SAME',
         kernel_initializer=tf.variance_scaling_initializer(),
         data_format=data_format,

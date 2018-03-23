@@ -41,6 +41,9 @@ parser.add_argument('--drop_path_keep_prob', type=float, default=0.6,
 parser.add_argument('--dense_dropout_keep_prob', type=float, default=1.0,
                     help='Dropout rate.')
 
+parser.add_argument('--stem_multiplier', type=float, default=3.0,
+                    help='Stem convolution multiplier. Default is 3.0 for CIFAR-10. 1.0 is for ImageNet.')
+
 parser.add_argument('--train_epochs', type=int, default=310,
                     help='The number of epochs to train.')
 
@@ -408,6 +411,7 @@ def get_params(random_sample):
     'activation': FLAGS.activation,
     'dense_dropout_keep_prob': FLAGS.dense_dropout_keep_prob,
     'drop_path_keep_prob': drop_path_keep_prob,
+    'stem_multiplier': FLAGS.stem_multiplier,
     'total_steps': total_steps,
     'split': FLAGS.split_train_valid,
     'train_epochs': FLAGS.train_epochs,
