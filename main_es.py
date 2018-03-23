@@ -50,14 +50,17 @@ parser.add_argument('--epochs_per_eval', type=int, default=10,
 parser.add_argument('--batch_size', type=int, default=128,
                     help='The number of images per batch.')
 
-parser.add_argument('--random_dag', type=bool, default=False,
-                    help='Random sample a dag to run.')
+parser.add_argument('--random_sample', type=bool, default=False,
+                    help='Random sample a structure and hyper to run.')
 
 parser.add_argument('--dag', type=int, default=0,
                     help='Dag to run.')
 
+parser.add_argument('--split_train_valid', type=bool, default=False,
+                    help='Split training data to train set and valid set.')
+
 parser.add_argument('--activation', type=str, default=None,
-					help='Activation function for convolutions.')
+          help='Activation function for convolutions.')
 
 parser.add_argument(
     '--data_format', type=str, default=None,
@@ -98,8 +101,9 @@ _WEIGHT_DECAY = 2e-4
 _MOMENTUM = 0.9
 
 _NUM_IMAGES = {
-    'train': 50000,
-    'validation': 10000,
+    'train': 45000,
+    'valid': 5000
+    'test': 10000,
 }
 
 
@@ -109,21 +113,30 @@ def record_dataset(filenames):
   return tf.data.FixedLengthRecordDataset(filenames, record_bytes)
 
 
-def get_filenames(is_training, data_dir):
+def get_filenames(split, mode, data_dir):
   """Returns a list of filenames."""
-  data_dir = os.path.join(data_dir, 'cifar-10-batches-bin')
+  if not split:
+    data_dir = os.path.join(data_dir, 'cifar-10-batches-bin')
 
   assert os.path.exists(data_dir), (
       'Run cifar10_download_and_extract.py first to download and extract the '
       'CIFAR-10 data.')
 
-  if is_training:
-    return [
+  if split:
+    if mode == 'train':
+      return [os.path.join(data_dir, 'train_batch.bin')]
+    elif mode == 'valid':
+      return [os.path.join(data_dir, 'valid_batch.bin')]
+    else；
+      return [os.path.join(data_dir, 'test_bath.bin')]
+  else:
+    if mode == 'train':
+      return [
         os.path.join(data_dir, 'data_batch_%d.bin' % i)
         for i in range(1, _NUM_DATA_FILES + 1)
     ]
-  else:
-    return [os.path.join(data_dir, 'test_batch.bin')]
+    else:
+      return [os.path.join(data_dir, 'test_batch.bin')]
 
 
 def parse_record(raw_record):
@@ -172,7 +185,7 @@ def preprocess_image(image, is_training):
   return image
 
 
-def input_fn(is_training, data_dir, batch_size, num_epochs=1):
+def input_fn(split, mode, data_dir, batch_size, num_epochs=1):
   """Input_fn using the tf.data input pipeline for CIFAR-10 dataset.
 
   Args:
@@ -184,13 +197,18 @@ def input_fn(is_training, data_dir, batch_size, num_epochs=1):
   Returns:
     A tuple of images and labels.
   """
-  dataset = record_dataset(get_filenames(is_training, data_dir))
+  dataset = record_dataset(get_filenames(split, mode, data_dir))
+  is_training = mode in ['train', 'valid']
+
 
   if is_training:
     # When choosing shuffle buffer sizes, larger sizes result in better
     # randomness, while smaller sizes have better performance. Because CIFAR-10
     # is a relatively small dataset, we choose to shuffle the full epoch.
-    dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train'])
+    if split:
+      dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train'])
+    else:
+      dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train']+_NUM_IMAGES['valid'])
 
   dataset = dataset.map(parse_record)
   dataset = dataset.map(
@@ -263,12 +281,14 @@ def cifar10_model_fn(features, labels, mode, params):
     # is 128, the learning rate should be 0.1.
     global_step = tf.train.get_or_create_global_step()
 
+    num_images = _NUM_IMAGES['train'] if FLAGS.split_train_valid else _NUM_IMAGES['train'] + _NUM_IMAGES['valid']
+
     if FLAGS.lr_schedule == 'cosine':
       lr_max = FLAGS.lr_max
       lr_min = FLAGS.lr_min
       T_0 = tf.constant(FLAGS.T_0, dtype=tf.float32)
       T_mul = tf.constant(FLAGS.T_mul, dtype=tf.float32)
-      batches_per_epoch = _NUM_IMAGES['train'] / params['batch_size']
+      batches_per_epoch = num_images / params['batch_size']
       
       cur_epoch = tf.cast(global_step, dtype=tf.float32) / batches_per_epoch + 1.0
       cur_i = tf.ceil(tf.log((T_mul - 1.0) * (cur_epoch / T_0 + 1.0)) / tf.log(2.0) - 1.0)
@@ -278,7 +298,7 @@ def cifar10_model_fn(features, labels, mode, params):
       T_cur = cur_epoch - T_beg
       learning_rate = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + tf.cos(T_cur / T_i * np.pi))
     elif FLAGS.lr_schedule == 'decay':
-      batches_per_epoch = _NUM_IMAGES['train'] / params['batch_size']
+      batches_per_epoch = num_images / params['batch_size']
       boundaries = [int(batches_per_epoch * epoch) for epoch in [100, 200, 300]]
       values = [FLAGS.lr * decay for decay in [1, 0.1, 0.01, 0.001]]
       learning_rate = tf.train.piecewise_constant(
@@ -326,8 +346,27 @@ def cifar10_model_fn(features, labels, mode, params):
       train_op=train_op,
       eval_metric_ops=metrics)
 
-def build_dag():
-  if FLAGS.random_dag:
+
+def get_dag(num_nodes, cell='conv_dag'):
+  dag = OrderedDict()
+  operations = list(model._OPERATIONS)
+  num_operations = len(operations)
+  for i in xrange(1, num_nodes+1):
+    name = 'node_%d' % i
+    if i == 1 or i == 2:
+      node = model.Node(name, None, None, None, None)
+    else:
+      p_node_1 = 'node_%d' % random.randint(1, i-1) 
+      p_node_2 = 'node_%d' % random.randint(1, i-1)
+      op1 = operations[random.randint(0, num_operations-1)]  
+      op2 = operations[random.randint(0, num_operations-1)]  
+      node = model.Node(name, p_node_1, p_node_2, op1, op2)
+    dag[name] = node
+  return dag
+
+
+def build_dag(random_sample):
+  if random_sample:
     conv_dag = get_dag(FLAGS.num_nodes, 'conv_dag')
     reduc_dag = get_dag(FLAGS.num_nodes, 'reduc_dag') 
   else:
@@ -376,33 +415,51 @@ def build_dag():
     json.dump(dag, f)
   return conv_dag, reduc_dag
 
+
+def get_params(random_sample):
+  if random_sample:
+    drop_path_keep_prob = random.sample([0.5, 0.6, 0.7], 1)
+    filters = random.sample([36, , ], 1)
+  else:
+    drop_path_keep_prob = FLAGS.drop_path_keep_prob
+    filters = FLAGS.filters
+  
+  conv_dag, reduc_dag = build_dag(random_sample)
+  
+  if FLAGS.split_train_valid:
+    total_steps = int(FLAGS.train_epochs * _NUM_IMAGES['train'] / float(FLAGS.batch_size))
+  else:
+    total_steps = int(FLAGS.train_epochs * (_NUM_IMAGES['train'] + _NUM_IMAGES['valid']) / float(FLAGS.batch_size))
+  
+  params={
+    'arch': FLAGS.arch,
+    'num_nodes': FLAGS.num_nodes,
+    'num_classes': _NUM_CLASSES,
+    'filters': filters,
+    'conv_dag': conv_dag,
+    'reduc_dag': reduc_dag,
+    'data_format': FLAGS.data_format,
+    'batch_size': FLAGS.batch_size,
+    'activation': FLAGS.activation,
+    'dense_dropout_keep_prob': FLAGS.dense_dropout_keep_prob,
+    'drop_path_keep_prob': drop_path_keep_prob,
+    'total_steps': total_steps,
+    'split':FLAGS.split_train_valid,
+  }
+  return params
+
+
 def main(unused_argv):
   # Using the Winograd non-fused algorithms provides a small performance boost.
   os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 
-  conv_dag, reduc_dag = build_dag()
-  
-  total_steps = int(FLAGS.train_epochs * _NUM_IMAGES['train'] / float(FLAGS.batch_size))
+  params = get_params(FLAGS.random_sample)
 
   # Set up a RunConfig to only save checkpoints once per training cycle.
   run_config = tf.estimator.RunConfig().replace(save_checkpoints_secs=1e9)
   cifar_classifier = tf.estimator.Estimator(
       model_fn=cifar10_model_fn, model_dir=FLAGS.model_dir, config=run_config,
-      params={
-        'arch': FLAGS.arch,
-        'num_nodes': FLAGS.num_nodes,
-        'num_classes': _NUM_CLASSES,
-        'filters': FLAGS.filters,
-        'conv_dag': conv_dag,
-        'reduc_dag': reduc_dag,
-        'data_format': FLAGS.data_format,
-        'batch_size': FLAGS.batch_size,
-        'activation': FLAGS.activation,
-        'dense_dropout_keep_prob': FLAGS.dense_dropout_keep_prob,
-        'drop_path_keep_prob': FLAGS.drop_path_keep_prob,
-        'total_steps': total_steps,
-      })
-
+      params=params)
   for _ in range(FLAGS.train_epochs // FLAGS.epochs_per_eval):
     tensors_to_log = {
         'learning_rate': 'learning_rate',
@@ -415,12 +472,17 @@ def main(unused_argv):
 
     cifar_classifier.train(
         input_fn=lambda: input_fn(
-            True, FLAGS.data_dir, FLAGS.batch_size, FLAGS.epochs_per_eval),
+            FLAGS.split_train_valid, 'train', FLAGS.data_dir, FLAGS.batch_size, FLAGS.epochs_per_eval),
         hooks=[logging_hook])
 
+    # Valid the model and print results
+    eval_results = cifar_classifier.evaluate(
+        input_fn=lambda: input_fn(FLAGS.split_train_valid, 'valid', FLAGS.data_dir, FLAGS.batch_size))
+    print(eval_results)
+    
     # Evaluate the model and print results
     eval_results = cifar_classifier.evaluate(
-        input_fn=lambda: input_fn(False, FLAGS.data_dir, FLAGS.batch_size))
+        input_fn=lambda: input_fn(FLAGS.split_train_valid, 'test', FLAGS.data_dir, FLAGS.batch_size))
     print(eval_results)
 
 

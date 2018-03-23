@@ -12,6 +12,7 @@ nohup python main_es.py \
   --train_epochs=630 \
   --num_nodes=7 \
   --filters=48 \
+  --drop_path_keep_prob=0.8 \
   --batch_size=128 \
   --epochs_per_eval=5 \
   --lr_schedule=cosine >$LOG_DIR/train.$2.log 2>&1 &
