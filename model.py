@@ -152,7 +152,7 @@ def _dil_separable_conv2d(operation, inputs, filters, strides, activation, data_
 
 def _conv2d(operation, inputs, filters, strides, activation, data_format, is_training):
   kernel_size, _ = _operation_to_info(operation)
-  if len(kernel_size) == 1:
+  if isinstance(kernel_size, int):
     inputs = tf.nn.relu(inputs)
     with tf.variable_scope('conv_{0}x{0}_{1}'.format(kernel_size, 1)):
       inputs = tf.layers.conv2d(

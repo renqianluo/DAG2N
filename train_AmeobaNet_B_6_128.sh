@@ -14,7 +14,7 @@ nohup python main_es.py \
   --filters=128 \
   --num_nodes=7 \
   --drop_path_keep_prob=0.7 \
-  --batch_size=128 \
+  --batch_size=32 \
   --epochs_per_eval=5 \
   --l_max=0.2 \
   --l_min=0.0 \

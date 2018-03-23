@@ -101,7 +101,7 @@ _MOMENTUM = 0.9
 
 _NUM_IMAGES = {
     'train': 45000,
-    'valid': 5000
+    'valid': 5000,
     'test': 10000,
 }
 
@@ -126,7 +126,7 @@ def get_filenames(split, mode, data_dir):
       return [os.path.join(data_dir, 'train_batch.bin')]
     elif mode == 'valid':
       return [os.path.join(data_dir, 'valid_batch.bin')]
-    else；
+    else:
       return [os.path.join(data_dir, 'test_bath.bin')]
   else:
     if mode == 'train':
