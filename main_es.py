@@ -459,11 +459,13 @@ def main(unused_argv):
       # Valid the model and print results
       eval_results = cifar_classifier.evaluate(
           input_fn=lambda: input_fn(FLAGS.split_train_valid, 'valid', FLAGS.data_dir, FLAGS.batch_size))
+      tf.logging.info('Evaluation on valid data set')
       print(eval_results)
     
     # Evaluate the model and print results
     eval_results = cifar_classifier.evaluate(
         input_fn=lambda: input_fn(FLAGS.split_train_valid, 'test', FLAGS.data_dir, FLAGS.batch_size))
+    tf.logging.info('Evaluation on test data set')
     print(eval_results)
 
 

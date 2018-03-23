@@ -635,7 +635,7 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
         with tf.variable_scope('reduction_cell_%d' % (reduction_layers.index(cell_num)+1)):
           last_inputs, inputs = reduction_cell(inputs, filter_scaling, 2, last_inputs, true_cell_num)
         true_cell_num += 1
-      with tf.variable_scope('convolution_cell_%d' % cell_num):
+      with tf.variable_scope('convolution_cell_%d' % (cell_num+1)):
         last_inputs, inputs = convolution_cell(inputs, filter_scaling, strides, last_inputs, true_cell_num)
       true_cell_num += 1
      
