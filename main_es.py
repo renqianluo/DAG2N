@@ -96,9 +96,7 @@ _DEPTH = 3
 _NUM_CLASSES = 10
 _NUM_DATA_FILES = 5
 
-# We use a weight decay of 0.0002, which performs better than the 0.0001 that
-# was originally suggested.
-_WEIGHT_DECAY = 2e-4
+_WEIGHT_DECAY = 1e-4
 _MOMENTUM = 0.9
 
 _NUM_IMAGES = {

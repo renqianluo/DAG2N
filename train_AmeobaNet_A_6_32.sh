@@ -9,10 +9,15 @@ mkdir -p $LOG_DIR
 nohup python main_es.py \
   --data_dir=data \
   --model_dir=$MODEL_DIR \
-  --train_epochs=630 \
+  --train_epochs=600 \
+  --N=6 \
+  --filters=32 \
   --num_nodes=7 \
-  --filters=48 \
-  --drop_path_keep_prob=0.8 \
+  --drop_path_keep_prob=0.7 \
   --batch_size=128 \
   --epochs_per_eval=5 \
+  --l_max=0.2 \
+  --l_min=0.0 \
+  --T_0=600 \
+  --dag='AmoebaNet_A' \
   --lr_schedule=cosine >$LOG_DIR/train.$2.log 2>&1 &
