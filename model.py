@@ -309,7 +309,7 @@ def factorized_reduction(inputs, filters, strides, activation, data_format, is_t
       activation=activation)
 
   final_path = tf.concat(values=[path1, path2], axis=get_channel_index(data_format))
-  with tf.variable_scope('final_bn'):
+  with tf.variable_scope('final_path_bn'):
     inputs = batch_normalization(final_path, data_format, is_training)
 
   return inputs
@@ -356,13 +356,15 @@ class ENASCell(object):
       prev_layer = factorized_reduction(prev_layer, curr_num_filters, 2, activation, data_format, is_training)
     elif curr_num_filters != prev_num_filters:
       prev_layer = tf.nn.relu(prev_layer)
-      prev_layer = tf.layers.conv2d(
-        inputs=prev_layer, filters=curr_num_filters, kernel_size=1, 
-        strides=1, padding='SAME',
-        kernel_initializer=tf.variance_scaling_initializer(),
-        data_format=data_format,
-        activation=activation)
-      prev_layer = batch_normalization(prev_layer, data_format, is_training)
+      with tf.variable_scope('prev_1x1'):
+        prev_layer = tf.layers.conv2d(
+          inputs=prev_layer, filters=curr_num_filters, kernel_size=1, 
+          strides=1, padding='SAME',
+          kernel_initializer=tf.variance_scaling_initializer(),
+          data_format=data_format,
+          activation=activation)
+      with tf.variable_scope('prev_bn'):
+        prev_layer = batch_normalization(prev_layer, data_format, is_training)
     return prev_layer
 
 
@@ -375,8 +377,8 @@ class ENASCell(object):
     with tf.variable_scope('transforme_last_inputs'):
       last_inputs = self._reduce_prev_layer(last_inputs, inputs)
     with tf.variable_scope('transforme_inputs'):
+      inputs = tf.nn.relu(inputs)
       with tf.variable_scope('1x1'):
-        inputs = tf.nn.relu(inputs)
         inputs = tf.layers.conv2d(
           inputs=inputs, filters=filters, kernel_size=1, 
           strides=1, padding='SAME',
@@ -441,8 +443,7 @@ class ENASCell(object):
     return curr_inputs, output
 
 
-  def _apply_operation(self, operation, inputs, strides, 
-    is_from_original_input):
+  def _apply_operation(self, operation, inputs, strides, is_from_original_input):
     filters = self._filter_size
     activation = self._activation
     data_format = self._data_format
@@ -616,14 +617,14 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
 
   with tf.variable_scope('body', reuse=reuse):
     last_inputs = None
-    with tf.variable_scope('stem_conv_3x3'):
+    with tf.variable_scope('layer_1_stem_conv_3x3'):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=int(filters*stem_multiplier), kernel_size=3, strides=1,
         padding='SAME',
         kernel_initializer=tf.variance_scaling_initializer(),
         data_format=data_format,
-        activation=params['activation'])
-    with tf.variable_scope('bn'):
+        activation=activation)
+    with tf.variable_scope('layer_1_stem_bn'):
       inputs = batch_normalization(inputs, data_format, is_training)
 
     true_cell_num, filter_scaling = 0, 1
@@ -640,6 +641,8 @@ def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from in
       true_cell_num += 1
      
     inputs = tf.nn.relu(inputs)
+
+    assert inputs.shape.ndims == 4
         
     if data_format == 'channels_first':
       inputs = tf.reduce_mean(inputs, axis=[2,3])
