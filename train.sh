@@ -1,21 +1,24 @@
-echo Using CUDA $1, train model $2
+MODEL=debug
+echo Using CUDA $1, train model $MODEL
 
 export  CUDA_VISIBLE_DEVICES=$1
-#MODEL_DIR=/hdfs/sdrgvc/v-renluo/DAG2N/model/model_$2
-MODEL_DIR=model/model_$2
+MODEL_DIR=model/model_$MODEL
 LOG_DIR=log
 mkdir -p $MODEL_DIR
 mkdir -p $LOG_DIR
-nohup python main.py \
+nohup python main_es.py \
   --data_dir=data \
   --model_dir=$MODEL_DIR \
   --train_epochs=600 \
   --N=6 \
+  --filters=32 \
   --num_nodes=7 \
+  --drop_path_keep_prob=0.7 \
   --batch_size=128 \
-  --epochs_per_eval=5 \
-  --l_max=0.2 \
-  --l_min=0.0 \
+  --epochs_per_eval=10 \
+  --lr_max=0.024 \
+  --lr_min=0.0 \
   --T_0=600 \
-  --random_sample=True \
-  --lr_schedule=cosine >$LOG_DIR/train.$2.log 2>&1 &
+  --dag='AmoebaNet_A' \
+  --split_train_valid=True \
+  --lr_schedule=cosine >$LOG_DIR/train.$MODEL.log 2>&1 &

@@ -214,7 +214,7 @@ def _operation_to_filter_shape(operation):
     filter_shapes = operation.split('+')
     filter_shape = []
     for fs in filter_shapes:
-      filter_height_width = e.split('x')
+      filter_height_width = fs.split('x')
       filter_height = int(filter_height_width[0])
       filter_width = int(filter_height_width[1])
       filter_shape.append((filter_height, filter_width))
