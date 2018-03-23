@@ -130,7 +130,7 @@ def get_filenames(split, mode, data_dir):
     elif mode == 'valid':
       return [os.path.join(data_dir, 'valid_batch.bin')]
     else:
-      return [os.path.join(data_dir, 'test_bath.bin')]
+      return [os.path.join(data_dir, 'test_batch.bin')]
   else:
     if mode == 'train':
       return [
@@ -455,7 +455,7 @@ def main(unused_argv):
             FLAGS.split_train_valid, 'train', FLAGS.data_dir, FLAGS.batch_size, FLAGS.epochs_per_eval),
         hooks=[logging_hook])
 
-    if not FLAGS.split_train_valid:
+    if FLAGS.split_train_valid:
       # Valid the model and print results
       eval_results = cifar_classifier.evaluate(
           input_fn=lambda: input_fn(FLAGS.split_train_valid, 'valid', FLAGS.data_dir, FLAGS.batch_size))

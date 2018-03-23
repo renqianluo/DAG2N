@@ -10,12 +10,12 @@ nohup python main_es.py \
   --data_dir=data \
   --model_dir=$MODEL_DIR \
   --train_epochs=600 \
-  --N=6 \
+  --N=1 \
   --filters=32 \
   --num_nodes=7 \
   --drop_path_keep_prob=0.7 \
   --batch_size=128 \
-  --epochs_per_eval=10 \
+  --epochs_per_eval=1 \
   --lr_max=0.024 \
   --lr_min=0.0 \
   --T_0=600 \
