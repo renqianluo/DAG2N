@@ -283,13 +283,13 @@ def cifar10_model_fn(features, labels, mode, params):
     # is 128, the learning rate should be 0.1.
     global_step = tf.train.get_or_create_global_step()
 
-    num_images = _NUM_IMAGES['train'] if FLAGS.split_train_valid else _NUM_IMAGES['train'] + _NUM_IMAGES['valid']
+    num_images = _NUM_IMAGES['train'] if params['split_train_valid'] else _NUM_IMAGES['train'] + _NUM_IMAGES['valid']
 
-    if FLAGS.lr_schedule == 'cosine':
-      lr_max = FLAGS.lr_max
-      lr_min = FLAGS.lr_min
-      T_0 = tf.constant(FLAGS.T_0, dtype=tf.float32)
-      T_mul = tf.constant(FLAGS.T_mul, dtype=tf.float32)
+    if params['lr_schedule'] == 'cosine':
+      lr_max = params['lr_max']
+      lr_min = params['lr_min']
+      T_0 = tf.constant(params['T_0'], dtype=tf.float32)
+      T_mul = tf.constant(params['T_mul'], dtype=tf.float32)
       batches_per_epoch = num_images / params['batch_size']
       
       cur_epoch = tf.cast(global_step, dtype=tf.float32) / batches_per_epoch + 1.0
@@ -299,10 +299,10 @@ def cifar10_model_fn(features, labels, mode, params):
       
       T_cur = cur_epoch - T_beg
       learning_rate = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + tf.cos(T_cur / T_i * np.pi))
-    elif FLAGS.lr_schedule == 'decay':
+    elif params['lr_schedule'] == 'decay':
       batches_per_epoch = num_images / params['batch_size']
       boundaries = [int(batches_per_epoch * epoch) for epoch in [100, 200, 300]]
-      values = [FLAGS.lr * decay for decay in [1, 0.1, 0.01, 0.001]]
+      values = [params['lr'] * decay for decay in [1, 0.1, 0.01, 0.001]]
       learning_rate = tf.train.piecewise_constant(
         tf.cast(global_step, tf.int32), boundaries, values)
     else:
@@ -394,7 +394,7 @@ def random_pick(sample_list, probs=None):
         break
     return item
   else:
-    return random.sample(sample_list, 1)
+    return random.sample(sample_list, 1)[0]
 
 
 def get_params(random_sample):
@@ -429,7 +429,7 @@ def get_params(random_sample):
     'drop_path_keep_prob': drop_path_keep_prob,
     'stem_multiplier': FLAGS.stem_multiplier,
     'total_steps': total_steps,
-    'split': FLAGS.split_train_valid,
+    'split_train_valid': FLAGS.split_train_valid,
     'train_epochs': FLAGS.train_epochs,
     'epochs_per_eval' : FLAGS.epochs_per_eval,
     'dag': FLAGS.dag,
@@ -438,6 +438,7 @@ def get_params(random_sample):
     'lr_min' : FLAGS.lr_min,
     'T_0' : FLAGS.T_0,
     'T_mul' : FLAGS.T_mul,
+    'lr' : FLAGS.lr,
   }
   return params
 
