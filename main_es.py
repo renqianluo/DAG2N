@@ -404,9 +404,20 @@ def get_params(random_sample):
   else:
     drop_path_keep_prob = FLAGS.drop_path_keep_prob
     filters = FLAGS.filters
-
-  if filters >= 64:
-    FLAGS.batch_size = min(FLAGS.batch_size // 2, 64)
+  """
+  +------+--------+------+
+  | GPU  |  F     | batch|
+  -----------------------+
+  | 24G  | 128    | 64   |
+  | 24G  | <128   | 128  |
+  | 12G  | 32-36  | 128  |
+  | 12G  | 36-128 | 64   |
+  | 12G  | 128    | 32   |
+  +------+--------+------+
+  """
+  # This config is for 24G Mem
+  if filters >= 128: 
+    FLAGS.batch_size = min(FLAGS.batch_size, 64)
   
   conv_dag, reduc_dag = build_dag(random_sample, FLAGS.dag)
   
