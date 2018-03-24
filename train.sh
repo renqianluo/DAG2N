@@ -11,7 +11,7 @@ nohup python main_es.py \
   --model_dir=$MODEL_DIR \
   --train_epochs=600 \
   --N=6 \
-  --filters=32 \
+  --filters=36 \
   --num_nodes=7 \
   --drop_path_keep_prob=0.7 \
   --batch_size=128 \
