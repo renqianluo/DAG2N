@@ -119,7 +119,7 @@ def _dil_separable_conv2d(operation, inputs, filters, strides, activation, data_
     dilation_rate = 2
 
   inputs = tf.nn.relu(inputs) 
-  with tf.variable_scope('dil_separable_conv_{0}x{0}_{1}'.format(kernel_size, 1)):
+  with tf.variable_scope('dil_separable_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 1)):
     inputs = tf.layers.separable_conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
       strides=strides, depth_multiplier=1,
@@ -134,7 +134,7 @@ def _dil_separable_conv2d(operation, inputs, filters, strides, activation, data_
   strides = 1
 
   inputs = tf.nn.relu(inputs)
-  with tf.variable_scope('dil_separable_conv_{0}x{0}_{1}'.format(kernel_size, 2)):
+  with tf.variable_scope('dil_separable_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 2)):
     inputs = tf.layers.separable_conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
       strides=strides, depth_multiplier=1,
@@ -455,7 +455,19 @@ class ENASCell(object):
     if 'dil_sep_conv' in operation:
       inputs = _dil_separable_conv2d(operation, inputs, filters, strides, activation, data_format, is_training)
     elif 'dil_conv' in operation:
-      inputs = _dil_conv2d(operation, inputs, filters, strides, activation, data_format, is_training)
+      #dilation > 1 is not compatible with strides > 1, so set strides to 1, and use a 1x1 conv with expected strdies
+      inputs = _dil_conv2d(operation, inputs, filters, 1, activation, data_format, is_training)
+      if strides > 1:
+        inputs = tf.nn.relu(inputs)
+        with tf.variable_scope('1x1'):
+          inputs = tf.layers.conv2d(
+            inputs=inputs, filters=filters, kernel_size=1, 
+            strides=strides, padding='SAME',
+            kernel_initializer=tf.variance_scaling_initializer(),
+            data_format=data_format,
+            activation=activation)
+        with tf.variable_scope('bn_1'):
+          inputs = batch_normalization(inputs, data_format, is_training)
     elif 'sep_conv' in operation:
       inputs = _separable_conv2d(operation, inputs, filters, strides, activation, data_format, is_training)
     elif 'conv' in operation:
