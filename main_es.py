@@ -394,7 +394,7 @@ def random_pick(sample_list, probs=None):
         break
     return item
   else:
-    return random.sample(sample_list, 1)
+    return random.sample(sample_list, 1)[0]
 
 
 def get_params(random_sample):
