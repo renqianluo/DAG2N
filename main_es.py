@@ -406,7 +406,7 @@ def get_params(random_sample):
     filters = FLAGS.filters
 
   if filters >= 64:
-    FLAGS.batch_size = 64
+    FLAGS.batch_size = min(FLAGS.batch_size // 2, 64)
   
   conv_dag, reduc_dag = build_dag(random_sample, FLAGS.dag)
   
