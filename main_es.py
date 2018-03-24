@@ -384,13 +384,29 @@ def build_dag(random_sample, name):
   return conv_dag, reduc_dag
 
 
+def random_pick(sample_list, probs=None):
+  if probs is not None:
+    x = random.uniform(0, 1)
+    cumulative_prob = 0.0
+    for item, item_prob in zip(sample_list, probs):
+      cumulative_prob += item_prob
+      if x < cumulative_prob:
+        break
+    return item
+  else:
+    return random.sample(sample_list, 1)
+
+
 def get_params(random_sample):
   if random_sample:
-    drop_path_keep_prob = random.sample([0.5, 0.6, 0.7], 1)
-    filters = random.sample([36, 80, 128], 1)
+    drop_path_keep_prob = random_pick([0.5, 0.6, 0.7])
+    filters = random_pick([36, 64, 128], [0.4, 0.4, 0.2])
   else:
     drop_path_keep_prob = FLAGS.drop_path_keep_prob
     filters = FLAGS.filters
+
+  if filters >= 64:
+    FLAGS.batch_size = 64
   
   conv_dag, reduc_dag = build_dag(random_sample, FLAGS.dag)
   
