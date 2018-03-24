@@ -29,9 +29,9 @@ _OPERATIONS=[
   'dil_sep_conv 3x3',
   'dil_sep_conv 5x5',
   'dil_sep_conv 7x7',
-  'dil_conv 3x3 2',
-  'dil_conv 3x3 4',
-  'dil_conv 3x3 6',
+#  'dil_conv 3x3 2',
+#  'dil_conv 3x3 4',
+#  'dil_conv 3x3 6',
 ]
 
 Node = namedtuple('Node', ['name', 'previous_node_1', 'previous_node_2', 'operation_1', 'operation_2'])
