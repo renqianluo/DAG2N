@@ -6,7 +6,7 @@ from six.moves import xrange
 from collections import namedtuple, OrderedDict
 import tensorflow as tf
 
-_BATCH_NORM_DECAY = 0.997
+_BATCH_NORM_DECAY = 0.9 #0.997
 _BATCH_NORM_EPSILON = 1e-5
 
 _OPERATIONS=[
@@ -54,7 +54,7 @@ def get_channel_index(data_format='INVALID'):
 
 def batch_normalization(inputs, data_format, is_training):
   inputs = tf.layers.batch_normalization(
-    inputs=inputs, axis=1 if data_format == 'channels_first' else 3,
+    inputs=inputs, axis=get_channel_index(data_format),
     momentum=_BATCH_NORM_DECAY, epsilon=_BATCH_NORM_EPSILON, center=True,
     scale=True, training=is_training, fused=True)
   return inputs
