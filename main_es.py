@@ -279,7 +279,7 @@ def cifar10_model_fn(features, labels, mode, params):
   tf.summary.scalar('cross_entropy', cross_entropy)
 
   # Add weight decay to the loss.
-  loss = cross_entropy + _WEIGHT_DECAY * tf.add_n(
+  loss = cross_entropy + params['weight_decay'] * tf.add_n(
       [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
 
 
