@@ -21,4 +21,5 @@ nohup python main_es.py \
   --T_0=300 \
   --dag='ENAS' \
   --use_nesterov=True \
+  --weight_decay=0.0001 \
   --lr_schedule=cosine >$LOG_DIR/train.$MODEL.log 2>&1 &

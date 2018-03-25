@@ -17,6 +17,22 @@ import datetime
 import model
 import dag
 
+_HEIGHT = 32
+_WIDTH = 32
+_DEPTH = 3
+_NUM_CLASSES = 10
+_NUM_DATA_FILES = 5
+
+_WEIGHT_DECAY = 5e-4 #1e-4
+_MOMENTUM = 0.9
+
+_NUM_IMAGES = {
+    'train': 45000,
+    'valid': 5000,
+    'test': 10000,
+}
+
+
 parser = argparse.ArgumentParser()
 
 # Basic model parameters.
@@ -69,6 +85,9 @@ parser.add_argument('--activation', type=str, default=None,
 parser.add_argument('--use_nesterov', type=bool, default=False,
                     help='Random sample a structure and hyper to run.')
 
+parser.add_argument('--weight_decay', type=float, default=_WEIGHT_DECAY,
+                    help='Random sample a structure and hyper to run.')
+
 parser.add_argument(
     '--data_format', type=str, default=None,
     choices=['channels_first', 'channels_last'],
@@ -95,21 +114,6 @@ parser.add_argument('--T_0', type=int, default=10,
 
 parser.add_argument('--T_mul', type=int, default=2,
                     help='Multiplicator for the cycle.')
-
-_HEIGHT = 32
-_WIDTH = 32
-_DEPTH = 3
-_NUM_CLASSES = 10
-_NUM_DATA_FILES = 5
-
-_WEIGHT_DECAY = 5e-4 #1e-4
-_MOMENTUM = 0.9
-
-_NUM_IMAGES = {
-    'train': 45000,
-    'valid': 5000,
-    'test': 10000,
-}
 
 
 def record_dataset(filenames):
