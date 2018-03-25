@@ -66,6 +66,9 @@ parser.add_argument('--split_train_valid', type=bool, default=False,
 parser.add_argument('--activation', type=str, default=None,
           help='Activation function for convolutions.')
 
+parser.add_argument('--use_nesterov', type=bool, default=False,
+                    help='Random sample a structure and hyper to run.')
+
 parser.add_argument(
     '--data_format', type=str, default=None,
     choices=['channels_first', 'channels_last'],
@@ -324,7 +327,8 @@ def cifar10_model_fn(features, labels, mode, params):
 
     optimizer = tf.train.MomentumOptimizer(
         learning_rate=learning_rate,
-        momentum=_MOMENTUM)
+        momentum=_MOMENTUM,
+        use_nesterov=hparams['use_nesterov'])
 
     # Batch norm requires update ops to be added as a dependency to the train_op
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
@@ -444,6 +448,7 @@ def get_params(random_sample):
     'train_epochs': FLAGS.train_epochs,
     'epochs_per_eval' : FLAGS.epochs_per_eval,
     'dag': FLAGS.dag,
+    'use_nesterov': FLAGS.use_nesterov,
     'lr_schedule' : FLAGS.lr_schedule,
     'lr_max' : FLAGS.lr_max,
     'lr_min' : FLAGS.lr_min,
