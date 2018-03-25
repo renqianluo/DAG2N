@@ -563,7 +563,7 @@ class ENASCell(object):
     return inputs
 
 
-def build_model(inputs, params, is_training, reuse=False) -> 'Get logits from inputs':
+def build_model(inputs, params, is_training, reuse=False):
   """Generator for net.
 
   Args:
