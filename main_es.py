@@ -490,19 +490,19 @@ def main(unused_argv):
 
     cifar_classifier.train(
         input_fn=lambda: input_fn(
-            FLAGS.split_train_valid, 'train', FLAGS.data_dir, FLAGS.batch_size, FLAGS.epochs_per_eval),
+            params['split_train_valid'], 'train', FLAGS.data_dir, params['batch_size'], params['epochs_per_eval']),
         hooks=[logging_hook])
 
-    if FLAGS.split_train_valid:
+    if params['split_train_valid']:
       # Valid the model and print results
       eval_results = cifar_classifier.evaluate(
-          input_fn=lambda: input_fn(FLAGS.split_train_valid, 'valid', FLAGS.data_dir, FLAGS.batch_size))
+          input_fn=lambda: input_fn(params['split_train_valid'], 'valid', FLAGS.data_dir, params['batch_size']))
       tf.logging.info('Evaluation on valid data set')
       print(eval_results)
     
     # Evaluate the model and print results
     eval_results = cifar_classifier.evaluate(
-        input_fn=lambda: input_fn(FLAGS.split_train_valid, 'test', FLAGS.data_dir, FLAGS.batch_size))
+        input_fn=lambda: input_fn(params['split_train_valid'], 'test', FLAGS.data_dir, params['batch_size']))
     tf.logging.info('Evaluation on test data set')
     print(eval_results)
 
