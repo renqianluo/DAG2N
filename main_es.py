@@ -332,7 +332,7 @@ def cifar10_model_fn(features, labels, mode, params):
     optimizer = tf.train.MomentumOptimizer(
         learning_rate=learning_rate,
         momentum=_MOMENTUM,
-        use_nesterov=hparams['use_nesterov'])
+        use_nesterov=params['use_nesterov'])
 
     # Batch norm requires update ops to be added as a dependency to the train_op
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
