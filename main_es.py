@@ -453,6 +453,7 @@ def get_params(random_sample):
     'epochs_per_eval' : FLAGS.epochs_per_eval,
     'dag': FLAGS.dag,
     'use_nesterov': FLAGS.use_nesterov,
+    'weight_decay': FLAGS.weight_decay,
     'lr_schedule' : FLAGS.lr_schedule,
     'lr_max' : FLAGS.lr_max,
     'lr_min' : FLAGS.lr_min,
