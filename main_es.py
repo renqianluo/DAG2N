@@ -42,6 +42,9 @@ parser.add_argument('--data_dir', type=str, default='/tmp/cifar10_data',
 parser.add_argument('--model_dir', type=str, default='/tmp/cifar10_model',
                     help='The directory where the model will be stored.')
 
+parser.add_argument('--restore', type=bool, default=False,
+                    help='Restore from a configuration params.')
+
 parser.add_argument('--num_nodes', type=int, default=7,
                     help='The number of nodes in a cell.')
 
@@ -461,7 +464,7 @@ def get_params(random_sample):
     'T_mul' : FLAGS.T_mul,
     'lr' : FLAGS.lr,
   }
-  return params
+  return params 
 
 
 def main(unused_argv):
@@ -469,6 +472,11 @@ def main(unused_argv):
   os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 
   params = get_params(FLAGS.random_sample)
+
+  if FLAGS.reload:
+    with open(os.path.join(FLAGS.model_dir, 'hparams.json'), 'r') as f:
+      old_params = json.load(f)
+    params.update(old_params)
 
   with open(os.path.join(FLAGS.model_dir, 'hparams.json'), 'w') as f:
     json.dump(params, f)
