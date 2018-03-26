@@ -422,35 +422,27 @@ def get_params(random_sample):
   if random_sample:
     FLAGS.drop_path_keep_prob = random_pick([0.5, 0.6, 0.7])
     FLAGS.filters = random_pick([36, 64, 128], [0.4, 0.4, 0.2])
-  """
-  +------+--------+------+
-  | GPU  |  F     | batch|
-  -----------------------+
-  | 24G  | 128    | 64   |
-  | 24G  | <128   | 128  |
-  | 12G  | 32-36  | 128  |
-  | 12G  | 36-128 | 64   |
-  | 12G  | 128    | 32   |
-  +------+--------+------+
-  """
-  # This config is for 24G Mem
-  if FLAGS.filters >= 128: 
-    FLAGS.batch_size = min(FLAGS.batch_size, 64)
-  
+ 
   conv_dag, reduc_dag = build_dag(random_sample, FLAGS.dag)
   
   if FLAGS.split_train_valid:
     total_steps = int(FLAGS.train_epochs * _NUM_IMAGES['train'] / float(FLAGS.batch_size))
   else:
     total_steps = int(FLAGS.train_epochs * (_NUM_IMAGES['train'] + _NUM_IMAGES['valid']) / float(FLAGS.batch_size))
-  
-  params = {}
-  for k, v in FLAGS.__flags.items():
-    params[k] = v
+
+  params = var(FLAGS)
   params['num_classes'] = _NUM_CLASSES
   params['conv_dag'] = conv_dag
   params['reduc_dag'] = reduc_dag
   params['total_steps'] = total_steps
+
+  if FLAGS.restore:
+    with open(os.path.join(FLAGS.model_dir, 'hparams.json'), 'r') as f:
+      old_params = json.load(f)
+    for k,v in old_params:
+      if 'dag' in k or 'filters' in k or 'drop' in k:
+        params[k] = v
+
   
   return params 
 
@@ -460,11 +452,6 @@ def main(unused_argv):
   os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 
   params = get_params(FLAGS.random_sample)
-
-  if FLAGS.reload:
-    with open(os.path.join(FLAGS.model_dir, 'hparams.json'), 'r') as f:
-      old_params = json.load(f)
-    params.update(old_params)
 
   with open(os.path.join(FLAGS.model_dir, 'hparams.json'), 'w') as f:
     json.dump(params, f)
