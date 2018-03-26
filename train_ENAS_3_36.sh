@@ -18,8 +18,8 @@ nohup python main_es.py \
   --epochs_per_eval=5 \
   --lr_max=0.05 \
   --lr_min=0.001 \
-  --T_0=300 \
+  --T_0=10 \
   --dag='ENAS' \
   --use_nesterov \
   --weight_decay=0.0001 \
-  --lr_schedule=cosine >>$LOG_DIR/train.$MODEL.log 2>&1 &
+  --lr_schedule=cosine >$LOG_DIR/train.$MODEL.log 2>&1 &
