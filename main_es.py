@@ -429,8 +429,8 @@ def get_params(random_sample):
     total_steps = int(FLAGS.train_epochs * _NUM_IMAGES['train'] / float(FLAGS.batch_size))
   else:
     total_steps = int(FLAGS.train_epochs * (_NUM_IMAGES['train'] + _NUM_IMAGES['valid']) / float(FLAGS.batch_size))
-
-  params = var(FLAGS)
+  
+  params = vars(FLAGS)
   params['num_classes'] = _NUM_CLASSES
   params['conv_dag'] = conv_dag
   params['reduc_dag'] = reduc_dag
