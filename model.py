@@ -563,6 +563,41 @@ class ENASCell(object):
     return inputs
 
 
+def _build_aux_head(aux_net, num_classes, params):
+  data_format = params['data_format']
+  is_training = params['is_training']
+  with tf.variable_scope('aux_head'):
+    aux_logits = tf.identity(aux_net)
+    with tf.variable_scope('aux_logits'):
+      aux_logits = tf.layers.average_pooling2d(
+        inputs=aux_logits, 
+        pool_size=5, strides=3, padding='VALID', data_format=data_format)
+      aux_logits = tf.layers.conv2d(
+        inputs=aux_logits, filters=128, kernel_size=1, 
+        strides=1, padding='SAME', 
+        kernel_initializer=tf.variance_scaling_initializer(), 
+        data_format=data_format)
+      with tf.variable_scope('aux_bn0'):
+        aux_logits = batch_normalization(aux_logits, data_format, is_training)
+      aux_logits = tf.nn.relu(aux_logits)
+      shape = aux_logits.shape
+      if data_format == 'channels_first':
+        shape = shape[2:4]
+      else:
+        shape = shape[1:3]
+      aux_logits = tf.layers.conv2d(
+        inputs=aux_logits, filters=768, kernel_size=shape, 
+        strides=1, padding='VALID', 
+        kernel_initializer=tf.variance_scaling_initializer(), 
+        data_format=data_format)
+      with tf.variable_scope('aux_bn1'):
+        aux_logits = batch_normalization(aux_logits, data_format, is_training)
+      aux_logits = tf.nn.relu(aux_logits)
+      aux_logits = tf.layers.flatten(aux_logits)
+      aux_logits = tf.layers.dense(inputs=aux_logits, units=num_classes)
+  return aux_logits
+
+
 def build_model(inputs, params, is_training, reuse=False):
   """Generator for net.
 
@@ -605,6 +640,7 @@ def build_model(inputs, params, is_training, reuse=False):
     data_format = 'channels_first' if tf.test.is_built_with_cuda() else 'channels_last'
   num_classes = params['num_classes']
   stem_multiplier = params['stem_multiplier']
+  use_aux_head = params['use_aux_head']
 
   
   if data_format == 'channels_first':
@@ -626,6 +662,9 @@ def build_model(inputs, params, is_training, reuse=False):
     layer_num = (float(pool_num) / (2 + 1)) * num_cells
     layer_num = int(layer_num)
     reduction_layers.append(layer_num)
+
+  if len(reduction_layers) >= 2:
+    aux_head_ceill_index = reduction_layers[1] - 1
 
   with tf.variable_scope('body', reuse=reuse):
     last_inputs = None
@@ -651,7 +690,10 @@ def build_model(inputs, params, is_training, reuse=False):
       with tf.variable_scope('convolution_cell_%d' % (cell_num+1)):
         last_inputs, inputs = convolution_cell(inputs, filter_scaling, strides, last_inputs, true_cell_num)
       true_cell_num += 1
-     
+      if use_aux_head and aux_head_ceill_index == cell_num and num_classes and is_training:
+        aux_net = tf.nn.relu(inputs)
+        aux_net = _build_aux_head(aux_net, num_classes, params)
+
     inputs = tf.nn.relu(inputs)
 
     assert inputs.shape.ndims == 4
@@ -666,4 +708,7 @@ def build_model(inputs, params, is_training, reuse=False):
     with tf.variable_scope('fully_connected_layer'):
       inputs = tf.layers.dense(inputs=inputs, units=num_classes)
 
-  return inputs
+  res = {'logits': inputs}
+  if use_aux_head and is_training:
+    res['aux_logits'] = aux_logits
+  return res

@@ -20,4 +20,5 @@ nohup python main_es.py \
   --lr_min=0.0 \
   --T_0=600 \
   --dag='NASNet_A' \
+  --use_aux_head=True \
   --lr_schedule=cosine >$LOG_DIR/train.$MODEL.log 2>&1 &

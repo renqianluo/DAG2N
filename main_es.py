@@ -86,10 +86,16 @@ parser.add_argument('--activation', type=str, default=None,
           help='Activation function for convolutions.')
 
 parser.add_argument('--use_nesterov', type=bool, default=False,
-                    help='Random sample a structure and hyper to run.')
+                    help='Use nesterov in Momentum Optimizer.')
+
+parser.add_argument('--use_aux_head', type=bool, default=True,
+                    help='Use auxillary head.')
+
+parser.add_argument('--aux_head_weight', type=float, default=0.4,
+                    help='Weight of auxillary head loss.')
 
 parser.add_argument('--weight_decay', type=float, default=_WEIGHT_DECAY,
-                    help='Random sample a structure and hyper to run.')
+                    help='Weight decay.')
 
 parser.add_argument(
     '--data_format', type=str, default=None,
@@ -106,7 +112,7 @@ parser.add_argument('--lr_schedule', type=str, default='cosine',
 parser.add_argument('--lr', type=float, default='0.1',
                     help='Learning rate when learning rate schedule is constant.')
 
-parser.add_argument('--lr_max', type=float, default=0.2,  #0.05 in ENAS
+parser.add_argument('--lr_max', type=float, default=0.025,  #0.05 in ENAS
                     help='Max learning rate.')
 
 parser.add_argument('--lr_min', type=float, default=0.0, #0.001 in ENAS
@@ -263,7 +269,8 @@ def cifar10_model_fn(features, labels, mode, params):
   tf.summary.image('images', features, max_outputs=6)
 
   inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
-  logits = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
+  res = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
+  logits = res['logits']
 
   predictions = {
       'classes': tf.argmax(logits, axis=1),
@@ -285,12 +292,15 @@ def cifar10_model_fn(features, labels, mode, params):
   loss = cross_entropy + params['weight_decay'] * tf.add_n(
       [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
 
+  if 'aux_logits' in res:
+    aux_loss = tf.losses.softmax_cross_entropy(
+      logits=aux_logits, onehot_labels=labels, weights=params['aux_head_weight'])
+    loss += aux_loss
+
 
   _log_variable_sizes(tf.trainable_variables(), "Trainable Variables")
 
   if mode == tf.estimator.ModeKeys.TRAIN:
-    # Scale the learning rate linearly with the batch size. When the batch size
-    # is 128, the learning rate should be 0.1.
     global_step = tf.train.get_or_create_global_step()
 
     num_images = _NUM_IMAGES['train'] if params['split_train_valid'] else _NUM_IMAGES['train'] + _NUM_IMAGES['valid']
@@ -410,11 +420,8 @@ def random_pick(sample_list, probs=None):
 
 def get_params(random_sample):
   if random_sample:
-    drop_path_keep_prob = random_pick([0.5, 0.6, 0.7])
-    filters = random_pick([36, 64, 128], [0.4, 0.4, 0.2])
-  else:
-    drop_path_keep_prob = FLAGS.drop_path_keep_prob
-    filters = FLAGS.filters
+    FLAGS.drop_path_keep_prob = random_pick([0.5, 0.6, 0.7])
+    FLAGS.filters = random_pick([36, 64, 128], [0.4, 0.4, 0.2])
   """
   +------+--------+------+
   | GPU  |  F     | batch|
@@ -427,7 +434,7 @@ def get_params(random_sample):
   +------+--------+------+
   """
   # This config is for 24G Mem
-  if filters >= 128: 
+  if FLAGS.filters >= 128: 
     FLAGS.batch_size = min(FLAGS.batch_size, 64)
   
   conv_dag, reduc_dag = build_dag(random_sample, FLAGS.dag)
@@ -437,33 +444,14 @@ def get_params(random_sample):
   else:
     total_steps = int(FLAGS.train_epochs * (_NUM_IMAGES['train'] + _NUM_IMAGES['valid']) / float(FLAGS.batch_size))
   
-  params={
-    'N': FLAGS.N,
-    'num_nodes': FLAGS.num_nodes,
-    'num_classes': _NUM_CLASSES,
-    'filters': filters,
-    'conv_dag': conv_dag,
-    'reduc_dag': reduc_dag,
-    'data_format': FLAGS.data_format,
-    'batch_size': FLAGS.batch_size,
-    'activation': FLAGS.activation,
-    'dense_dropout_keep_prob': FLAGS.dense_dropout_keep_prob,
-    'drop_path_keep_prob': drop_path_keep_prob,
-    'stem_multiplier': FLAGS.stem_multiplier,
-    'total_steps': total_steps,
-    'split_train_valid': FLAGS.split_train_valid,
-    'train_epochs': FLAGS.train_epochs,
-    'epochs_per_eval' : FLAGS.epochs_per_eval,
-    'dag': FLAGS.dag,
-    'use_nesterov': FLAGS.use_nesterov,
-    'weight_decay': FLAGS.weight_decay,
-    'lr_schedule' : FLAGS.lr_schedule,
-    'lr_max' : FLAGS.lr_max,
-    'lr_min' : FLAGS.lr_min,
-    'T_0' : FLAGS.T_0,
-    'T_mul' : FLAGS.T_mul,
-    'lr' : FLAGS.lr,
-  }
+  params = {}
+  for k, v in FLAGS.__flags.items():
+    params[k] = v
+  params['num_classes'] = _NUM_CLASSES
+  params['conv_dag'] = conv_dag
+  params['reduc_dag'] = reduc_dag
+  params['total_steps'] = total_steps
+  
   return params 
 
 
