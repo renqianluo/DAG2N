@@ -563,9 +563,8 @@ class ENASCell(object):
     return inputs
 
 
-def _build_aux_head(aux_net, num_classes, params):
+def _build_aux_head(aux_net, num_classes, params, is_training):
   data_format = params['data_format']
-  is_training = params['is_training']
   with tf.variable_scope('aux_head'):
     aux_logits = tf.identity(aux_net)
     with tf.variable_scope('aux_logits'):
@@ -692,7 +691,7 @@ def build_model(inputs, params, is_training, reuse=False):
       true_cell_num += 1
       if use_aux_head and aux_head_ceill_index == cell_num and num_classes and is_training:
         aux_net = tf.nn.relu(inputs)
-        aux_net = _build_aux_head(aux_net, num_classes, params)
+        aux_net = _build_aux_head(aux_net, num_classes, params, is_training)
 
     inputs = tf.nn.relu(inputs)
 
