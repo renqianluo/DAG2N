@@ -42,7 +42,7 @@ parser.add_argument('--data_dir', type=str, default='/tmp/cifar10_data',
 parser.add_argument('--model_dir', type=str, default='/tmp/cifar10_model',
                     help='The directory where the model will be stored.')
 
-parser.add_argument('--restore', type=bool, default=False,
+parser.add_argument('--restore', action='store_true', default=False,
                     help='Restore from a configuration params.')
 
 parser.add_argument('--num_nodes', type=int, default=7,
@@ -72,23 +72,23 @@ parser.add_argument('--epochs_per_eval', type=int, default=10,
 parser.add_argument('--batch_size', type=int, default=128,
                     help='The number of images per batch.')
 
-parser.add_argument('--random_sample', type=bool, default=False,
+parser.add_argument('--random_sample', action='store_true', default=False,
                     help='Random sample a structure and hyper to run.')
 
 parser.add_argument('--dag', type=str, default=None,
                     choices=['ENAS', 'NASNet_A', 'AmoebaNet_A', 'AmoebaNet_B'],
                     help='Default dag to run.')
 
-parser.add_argument('--split_train_valid', type=bool, default=False,
+parser.add_argument('--split_train_valid', action='store_true', default=False,
                     help='Split training data to train set and valid set.')
 
 parser.add_argument('--activation', type=str, default=None,
           help='Activation function for convolutions.')
 
-parser.add_argument('--use_nesterov', type=bool, default=False,
+parser.add_argument('--use_nesterov', action='store_true', default=False,
                     help='Use nesterov in Momentum Optimizer.')
 
-parser.add_argument('--use_aux_head', type=bool, default=True,
+parser.add_argument('--use_aux_head', action='store_true', default=False,
                     help='Use auxillary head.')
 
 parser.add_argument('--aux_head_weight', type=float, default=0.4,
@@ -293,6 +293,7 @@ def cifar10_model_fn(features, labels, mode, params):
       [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
 
   if 'aux_logits' in res:
+    aux_logits = res['aux_logits']
     aux_loss = tf.losses.softmax_cross_entropy(
       logits=aux_logits, onehot_labels=labels, weights=params['aux_head_weight'])
     loss += aux_loss

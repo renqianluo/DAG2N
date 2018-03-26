@@ -1,5 +1,5 @@
 MODEL=ENAS_3_36
-echo Using CUDA $1, train model
+echo Using CUDA $1, train $MODEL
 
 export  CUDA_VISIBLE_DEVICES=$1
 MODEL_DIR=model/model_$MODEL
@@ -9,7 +9,7 @@ mkdir -p $LOG_DIR
 nohup python main_es.py \
   --data_dir=data \
   --model_dir=$MODEL_DIR \
-  --train_epochs=300 \
+  --train_epochs=600 \
   --N=3 \
   --filters=36 \
   --num_nodes=7 \
@@ -20,6 +20,6 @@ nohup python main_es.py \
   --lr_min=0.001 \
   --T_0=300 \
   --dag='ENAS' \
-  --use_nesterov=True \
+  --use_nesterov \
   --weight_decay=0.0001 \
-  --lr_schedule=cosine >$LOG_DIR/train.$MODEL.log 2>&1 &
+  --lr_schedule=cosine >>$LOG_DIR/train.$MODEL.log 2>&1 &
