@@ -142,7 +142,9 @@ def get_filenames(split, mode, data_dir):
 
   if split:
     if mode == 'train':
-      return [os.path.join(data_dir, 'train_batch.bin')]
+      return [
+        os.path.join(data_dir, 'train_batch_%d.bin' % i)
+        for i in range(1, _NUM_DATA_FILES + 1)]
     elif mode == 'valid':
       return [os.path.join(data_dir, 'valid_batch.bin')]
     else:

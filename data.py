@@ -51,9 +51,14 @@ def record_dataset(data_dir):
       train_data.append(contents[i])
   assert len(train_data) == _NUM_IMAGES['train']
   assert len(valid_data) == _NUM_IMAGES['valid']
-  with open(os.path.join(data_dir, 'train_batch.bin'), 'wb') as f:
-    for c in train_data:
-      f.write(c)
+
+  num_train_data = len(train_data)
+  num_train_data_per_file = num_train_data // _NUM_DATA_FILES
+  for i in range(1, _NUM_DATA_FILES+1):
+    with open(os.path.join(data_dir, 'train_batch_%d.bin' % i), 'wb') as f:
+      for j in range((i-1)*num_train_data_per_file, i*num_train_data_per_file):
+        f.write(train_data[j])
+
   with open(os.path.join(data_dir, 'valid_batch.bin'), 'wb') as f:
     for c in valid_data:
       f.write(c)

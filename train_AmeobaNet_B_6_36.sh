@@ -1,4 +1,4 @@
-MODEL=AmoebaNet_B_6_36
+MODEL=AmoebaNet_B_6_36_new
 echo Using CUDA $1, train model $MODEL
 
 export  CUDA_VISIBLE_DEVICES=$1
@@ -20,4 +20,5 @@ nohup python main_es.py \
   --lr_min=0.0 \
   --T_0=600 \
   --dag='AmoebaNet_B' \
+  --use_aux_head \
   --lr_schedule=cosine >$LOG_DIR/train.$MODEL.log 2>&1 &
