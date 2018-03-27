@@ -1,4 +1,4 @@
-MODEL=AmoebaNet_B_6_36_new
+MODEL=AmoebaNet_B_6_36
 echo Using CUDA $1, train model $MODEL
 
 export  CUDA_VISIBLE_DEVICES=$1
