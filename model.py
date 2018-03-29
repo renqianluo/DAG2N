@@ -422,9 +422,9 @@ class ENASCell(object):
           continue
         previous_node_1, previous_node_2 = node.previous_node_1, node.previous_node_2
         h1, h2 = h[previous_node_1], h[previous_node_2]
-        if previous_node_1 in loose_nodes:
+        if previous_node_1 in loose_ends:
           loose_ends.remove(previous_node_1)
-        if previous_node_2 in loose_nodes:
+        if previous_node_2 in loose_ends:
           loose_ends.remove(previous_node_2)
         operation_1, operation_2 = node.operation_1, node.operation_2
         with tf.variable_scope('input_1'):

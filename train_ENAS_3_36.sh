@@ -22,4 +22,4 @@ nohup python main_es.py \
   --dag='ENAS' \
   --use_nesterov \
   --weight_decay=0.0001 \
-  --lr_schedule=cosine >$LOG_DIR/train.$MODEL.log 2>&1 &
+  --lr_schedule=cosine >>$LOG_DIR/train.$MODEL.log 2>&1 &
