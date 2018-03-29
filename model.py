@@ -703,7 +703,7 @@ def build_model(inputs, params, is_training, reuse=False):
     else:
       inputs = tf.reduce_mean(inputs, axis=[1,2])
       
-    inputs = tf.layers.dropout(inputs, dense_dropout_keep_prob, is_training=is_training)
+    inputs = tf.layers.dropout(inputs, dense_dropout_keep_prob, training=is_training)
 
     with tf.variable_scope('fully_connected_layer'):
       inputs = tf.layers.dense(inputs=inputs, units=num_classes)

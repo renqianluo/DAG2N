@@ -329,7 +329,7 @@ def cifar10_model_fn(features, labels, mode, params):
       learning_rate = tf.train.piecewise_constant(
         tf.cast(global_step, tf.int32), boundaries, values)
     else:
-      learning_rate = FLAGS.lr
+      learning_rate = params['lr']
     """
     initial_learning_rate = 0.1 * params['batch_size'] / 128
     batches_per_epoch = _NUM_IMAGES['train'] / params['batch_size']
