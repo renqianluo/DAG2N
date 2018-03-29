@@ -313,12 +313,16 @@ def cifar10_model_fn(features, labels, mode, params):
       lr_min = params['lr_min']
       T_0 = tf.constant(params['T_0'], dtype=tf.float32)
       T_mul = tf.constant(params['T_mul'], dtype=tf.float32)
-      batches_per_epoch = num_images / params['batch_size']
+      batches_per_epoch = math.ceil(num_images / params['batch_size'])
       
-      cur_epoch = tf.cast(global_step, dtype=tf.float32) / batches_per_epoch + 1.0
-      cur_i = tf.ceil(tf.log((T_mul - 1.0) * (cur_epoch / T_0 + 1.0)) / tf.log(2.0) - 1.0)
-      T_beg = T_0 * (tf.pow(T_mul, cur_i) - 1.0) / (T_mul - 1.0)
-      T_i = T_0 * tf.pow(T_mul, cur_i)
+      cur_epoch = (tf.cast(global_step, dtype=tf.float32) + 1) / batches_per_epoch
+      if params['T_mul'] == 1:
+        cur_i = tf.floor(cur_epoch / T_0)
+        T_beg = T_0 * cur_i
+      else:
+        cur_i = tf.ceil(tf.log((T_mul - 1.0) * (cur_epoch / T_0 + 1.0)) / tf.log(2.0) - 1.0)
+        T_beg = T_0 * (tf.pow(T_mul, cur_i) - 1.0) / (T_mul - 1.0)
+        T_i = T_0 * tf.pow(T_mul, cur_i)
       
       T_cur = cur_epoch - T_beg
       learning_rate = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + tf.cos(T_cur / T_i * np.pi))
