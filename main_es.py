@@ -391,13 +391,13 @@ def get_dag(num_nodes, cell='conv_dag'):
   for i in xrange(1, num_nodes+1):
     name = 'node_%d' % i
     if i == 1 or i == 2:
-      node = model.Node(name, None, None, None, None)
+      node = [name, None, None, None, None]
     else:
       p_node_1 = 'node_%d' % random.randint(1, i-1) 
       p_node_2 = 'node_%d' % random.randint(1, i-1)
       op1 = operations[random.randint(0, num_operations-1)]  
       op2 = operations[random.randint(0, num_operations-1)]  
-      node = model.Node(name, p_node_1, p_node_2, op1, op2)
+      node = [name, p_node_1, p_node_2, op1, op2]
     dag[name] = node
   return dag
 

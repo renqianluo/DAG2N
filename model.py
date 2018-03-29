@@ -36,9 +36,6 @@ _OPERATIONS=[
 #  'dil_conv 3x3 6',
 ]
 
-Node = namedtuple('Node', ['name', 'previous_node_1', 'previous_node_2', 'operation_1', 'operation_2'])
-
-
 def get_channel_dim(shape, data_format='INVALID'):
   assert data_format != 'INVALID'
   assert len(shape) == 4
@@ -413,20 +410,20 @@ class ENASCell(object):
       name = 'node_%d' % i
       with tf.variable_scope(name):
         node = dag[name]
-        assert name == node.name, 'name incompatible with node.name'
+        assert name == node[0], 'name incompatible with node name'
         if i == 1:
           h[name] = last_inputs
           continue
         elif i == 2:
           h[name] = inputs
           continue
-        previous_node_1, previous_node_2 = node.previous_node_1, node.previous_node_2
+        previous_node_1, previous_node_2 = node[1], node[2]
         h1, h2 = h[previous_node_1], h[previous_node_2]
         if previous_node_1 in loose_ends:
           loose_ends.remove(previous_node_1)
         if previous_node_2 in loose_ends:
           loose_ends.remove(previous_node_2)
-        operation_1, operation_2 = node.operation_1, node.operation_2
+        operation_1, operation_2 = node[3], node[4]
         with tf.variable_scope('input_1'):
           is_from_original_input = int(previous_node_1.split('_')[-1]) < 3
           h1 = self._apply_operation(operation_1, h1, strides, is_from_original_input)
