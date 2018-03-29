@@ -624,12 +624,11 @@ def build_model(inputs, params, is_training, reuse=False):
   reduc_dag = params['reduc_dag']
   N = params['N']
   num_nodes = params['num_nodes']
-  if not is_training:
-    drop_path_keep_prob = 1.0
-    dense_dropout_keep_prob = 1.0
-  else:
+  if is_training:
     drop_path_keep_prob = params['drop_path_keep_prob']
-    dense_dropout_keep_prob = params['dense_dropout_keep_prob']
+  else:
+    drop_path_keep_prob = 1.0
+  dense_dropout_keep_prob = params['dense_dropout_keep_prob']
   total_steps = params['total_steps']
   if params['activation'] is None:
     activation = None
@@ -704,7 +703,7 @@ def build_model(inputs, params, is_training, reuse=False):
     else:
       inputs = tf.reduce_mean(inputs, axis=[1,2])
       
-    inputs = tf.nn.dropout(inputs, dense_dropout_keep_prob)
+    inputs = tf.layers.dropout(inputs, dense_dropout_keep_prob, is_training=is_training)
 
     with tf.variable_scope('fully_connected_layer'):
       inputs = tf.layers.dense(inputs=inputs, units=num_classes)
