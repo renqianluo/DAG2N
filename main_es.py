@@ -353,7 +353,10 @@ def cifar10_model_fn(features, labels, mode, params):
     # Batch norm requires update ops to be added as a dependency to the train_op
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
-      train_op = optimizer.minimize(loss, global_step)
+      #train_op = optimizer.minimize(loss, global_step)
+      gradients, variables = zip(*optimizer.compute_gradients(loss))
+      gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
+      train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
   else:
     train_op = None
 

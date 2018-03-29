@@ -8,6 +8,8 @@ import tensorflow as tf
 
 _BATCH_NORM_DECAY = 0.9 #0.997
 _BATCH_NORM_EPSILON = 1e-5
+_USE_BIAS = False
+
 
 _OPERATIONS=[
   'identity',
@@ -87,7 +89,7 @@ def _separable_conv2d(operation, inputs, filters, strides, activation, data_form
     inputs = tf.layers.separable_conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
       strides=strides, depth_multiplier=1,
-      padding='SAME',
+      padding='SAME', use_bias=_USE_BIAS,
       depthwise_initializer=tf.variance_scaling_initializer(),
       pointwise_initializer=tf.variance_scaling_initializer(),
       data_format=data_format,
@@ -101,7 +103,7 @@ def _separable_conv2d(operation, inputs, filters, strides, activation, data_form
     inputs = tf.layers.separable_conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
       strides=strides, depth_multiplier=1,
-      padding='SAME',
+      padding='SAME', use_bias=_USE_BIAS,
       depthwise_initializer=tf.variance_scaling_initializer(),
       pointwise_initializer=tf.variance_scaling_initializer(),
       data_format=data_format,
@@ -123,7 +125,7 @@ def _dil_separable_conv2d(operation, inputs, filters, strides, activation, data_
     inputs = tf.layers.separable_conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
       strides=strides, depth_multiplier=1,
-      padding='SAME',
+      padding='SAME', use_bias=_USE_BIAS,
       dilation_rate=dilation_rate,
       depthwise_initializer=tf.variance_scaling_initializer(),
       pointwise_initializer=tf.variance_scaling_initializer(),
@@ -138,7 +140,7 @@ def _dil_separable_conv2d(operation, inputs, filters, strides, activation, data_
     inputs = tf.layers.separable_conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
       strides=strides, depth_multiplier=1,
-      padding='SAME',
+      padding='SAME', use_bias=_USE_BIAS,
       dilation_rate=dilation_rate,
       depthwise_initializer=tf.variance_scaling_initializer(),
       pointwise_initializer=tf.variance_scaling_initializer(),
@@ -157,7 +159,7 @@ def _conv2d(operation, inputs, filters, strides, activation, data_format, is_tra
     with tf.variable_scope('conv_{0}x{0}_{1}'.format(kernel_size, 1)):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=filters, kernel_size=kernel_size, 
-        strides=strides, padding='SAME',
+        strides=strides, padding='SAME', use_bias=_USE_BIAS,
         kernel_initializer=tf.variance_scaling_initializer(),
         data_format=data_format,
         activation=activation)
@@ -170,7 +172,7 @@ def _conv2d(operation, inputs, filters, strides, activation, data_format, is_tra
     with tf.variable_scope('conv_{0}x{1}_{2}'.format(kernel_size1[0], kernel_size1[1], 1)):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=filters, kernel_size=kernel_size1, 
-        strides=strides, padding='SAME',
+        strides=strides, padding='SAME', use_bias=_USE_BIAS,
         kernel_initializer=tf.variance_scaling_initializer(),
         data_format=data_format,
         activation=activation)
@@ -183,7 +185,7 @@ def _conv2d(operation, inputs, filters, strides, activation, data_format, is_tra
     with tf.variable_scope('conv_{0}x{1}_{2}'.format(kernel_size2[0], kernel_size2[1], 2)):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=filters, kernel_size=kernel_size2, 
-        strides=strides, padding='SAME',
+        strides=strides, padding='SAME', use_bias=_USE_BIAS,
         kernel_initializer=tf.variance_scaling_initializer(),
         data_format=data_format,
         activation=activation)
@@ -198,7 +200,7 @@ def _dil_conv2d(operation, inputs, filters, strides, activation, data_format, is
   with tf.variable_scope('dil_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 1)):
     inputs = tf.layers.conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
-      strides=strides, padding='SAME',
+      strides=strides, padding='SAME', use_bias=_USE_BIAS,
       dilation_rate=dilation_rate,
       kernel_initializer=tf.variance_scaling_initializer(),
       data_format=data_format,
@@ -275,7 +277,7 @@ def factorized_reduction(inputs, filters, strides, activation, data_format, is_t
     with tf.variable_scope('path_conv'):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=filters, kernel_size=1, 
-        strides=strides, padding='SAME',
+        strides=strides, padding='SAME', use_bias=_USE_BIAS,
         kernel_initializer=tf.variance_scaling_initializer(),
         data_format=data_format,
         activation=activation)
@@ -287,7 +289,7 @@ def factorized_reduction(inputs, filters, strides, activation, data_format, is_t
   with tf.variable_scope('path1_conv'):
     path1 = tf.layers.conv2d(
       inputs=path1, filters=int(filters / 2), kernel_size=1, 
-      strides=1, padding='SAME',
+      strides=1, padding='SAME', use_bias=_USE_BIAS,
       kernel_initializer=tf.variance_scaling_initializer(),
       data_format=data_format,
       activation=activation)
@@ -303,7 +305,7 @@ def factorized_reduction(inputs, filters, strides, activation, data_format, is_t
   with tf.variable_scope('path2_conv'):
     path2 = tf.layers.conv2d(
       inputs=path2, filters=int(filters / 2), kernel_size=1, 
-      strides=1, padding='SAME',
+      strides=1, padding='SAME', use_bias=_USE_BIAS,
       kernel_initializer=tf.variance_scaling_initializer(),
       data_format=data_format,
       activation=activation)
@@ -359,7 +361,7 @@ class ENASCell(object):
       with tf.variable_scope('prev_1x1'):
         prev_layer = tf.layers.conv2d(
           inputs=prev_layer, filters=curr_num_filters, kernel_size=1, 
-          strides=1, padding='SAME',
+          strides=1, padding='SAME', use_bias=_USE_BIAS,
           kernel_initializer=tf.variance_scaling_initializer(),
           data_format=data_format,
           activation=activation)
@@ -381,7 +383,7 @@ class ENASCell(object):
       with tf.variable_scope('1x1'):
         inputs = tf.layers.conv2d(
           inputs=inputs, filters=filters, kernel_size=1, 
-          strides=1, padding='SAME',
+          strides=1, padding='SAME', use_bias=_USE_BIAS,
           kernel_initializer=tf.variance_scaling_initializer(),
           data_format=data_format,
           activation=activation)
@@ -402,13 +404,11 @@ class ENASCell(object):
     # node 1 and node 2 are last_inputs and inputs respectively
     # begin processing from node 3
 
-    assert num_nodes == len(dag), 'num_nodes of convolution cell is not equal to number of nodes in convolution DAG!'
-
     curr_inputs = inputs
     last_inputs, inputs = self._cell_base(last_inputs, inputs)
 
     h = {}
-    loose_nodes = ['node_%d' % i for i in xrange(1, num_nodes+1)]
+    loose_ends = ['node_%d' % i for i in xrange(1, num_nodes+1)]
     for i in xrange(1, num_nodes+1):
       name = 'node_%d' % i
       with tf.variable_scope(name):
@@ -423,9 +423,9 @@ class ENASCell(object):
         previous_node_1, previous_node_2 = node.previous_node_1, node.previous_node_2
         h1, h2 = h[previous_node_1], h[previous_node_2]
         if previous_node_1 in loose_nodes:
-          loose_nodes.remove(previous_node_1)
+          loose_ends.remove(previous_node_1)
         if previous_node_2 in loose_nodes:
-          loose_nodes.remove(previous_node_2)
+          loose_ends.remove(previous_node_2)
         operation_1, operation_2 = node.operation_1, node.operation_2
         with tf.variable_scope('input_1'):
           is_from_original_input = int(previous_node_1.split('_')[-1]) < 3
@@ -437,8 +437,11 @@ class ENASCell(object):
           output = h1 + h2
         h[name] = output
 
+    if 'loose_ends' in dag:
+      loose_ends = dag['loose_ends']
+
     with tf.variable_scope('cell_output'):
-      output = self._combine_unused_states(h, loose_nodes)
+      output = self._combine_unused_states(h, loose_ends)
     
     return curr_inputs, output
 
@@ -462,7 +465,7 @@ class ENASCell(object):
         with tf.variable_scope('1x1'):
           inputs = tf.layers.conv2d(
             inputs=inputs, filters=filters, kernel_size=1, 
-            strides=strides, padding='SAME',
+            strides=strides, padding='SAME', use_bias=_USE_BIAS,
             kernel_initializer=tf.variance_scaling_initializer(),
             data_format=data_format,
             activation=activation)
@@ -478,7 +481,7 @@ class ENASCell(object):
         with tf.variable_scope('1x1'):
           inputs = tf.layers.conv2d(
             inputs=inputs, filters=filters, kernel_size=1, 
-            strides=strides, padding='SAME',
+            strides=strides, padding='SAME', use_bias=_USE_BIAS,
             kernel_initializer=tf.variance_scaling_initializer(),
             data_format=data_format,
             activation=activation)
@@ -490,7 +493,7 @@ class ENASCell(object):
         with tf.variable_scope('1x1'):
           inputs = tf.layers.conv2d(
             inputs=inputs, filters=filters, kernel_size=1, 
-            strides=1, padding='SAME',
+            strides=1, padding='SAME', use_bias=_USE_BIAS,
             kernel_initializer=tf.variance_scaling_initializer(),
             data_format=data_format,
             activation=activation)
@@ -511,7 +514,7 @@ class ENASCell(object):
     is_training = self._is_training
 
     final_height = int(h['node_%d'%self._num_nodes].shape[2])
-    final_filters = get_channel_dim(h['node_%d'%self._num_nodes].shape, self._data_format)
+    final_filters = get_channel_dim(h['node_%d'%self._num_nodes].shape, data_format)
 
     for i in range(1, self._num_nodes+1):
       node_name = 'node_%d'%i
@@ -572,7 +575,7 @@ def _build_aux_head(aux_net, num_classes, params, data_format, is_training):
         pool_size=5, strides=3, padding='VALID', data_format=data_format)
       aux_logits = tf.layers.conv2d(
         inputs=aux_logits, filters=128, kernel_size=1, 
-        strides=1, padding='SAME', 
+        strides=1, padding='SAME', use_bias=_USE_BIAS,
         kernel_initializer=tf.variance_scaling_initializer(), 
         data_format=data_format)
       with tf.variable_scope('aux_bn0'):
@@ -585,7 +588,7 @@ def _build_aux_head(aux_net, num_classes, params, data_format, is_training):
         shape = shape[1:3]
       aux_logits = tf.layers.conv2d(
         inputs=aux_logits, filters=768, kernel_size=shape, 
-        strides=1, padding='VALID', 
+        strides=1, padding='VALID', use_bias=_USE_BIAS, 
         kernel_initializer=tf.variance_scaling_initializer(), 
         data_format=data_format)
       with tf.variable_scope('aux_bn1'):
@@ -669,7 +672,7 @@ def build_model(inputs, params, is_training, reuse=False):
     with tf.variable_scope('layer_1_stem_conv_3x3'):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=int(filters*stem_multiplier), kernel_size=3, strides=1,
-        padding='SAME',
+        padding='SAME', use_bias=_USE_BIAS,
         kernel_initializer=tf.variance_scaling_initializer(),
         data_format=data_format,
         activation=activation)

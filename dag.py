@@ -39,6 +39,7 @@ def AmoebaNet_A():
   reduc_dag['node_5'] = model.Node('node_5', 'node_1', 'node_2', 'sep_conv 7x7', 'avg_pool 3x3')
   reduc_dag['node_6'] = model.Node('node_6', 'node_2', 'node_1', 'max_pool 3x3', 'max_pool 3x3')
   reduc_dag['node_7'] = model.Node('node_7', 'node_6', 'node_1', 'sep_conv 3x3', 'conv 1x7+7x1')
+
   return conv_dag, reduc_dag
 
 def AmoebaNet_B():
@@ -70,6 +71,7 @@ def NASNet_A():
   conv_dag['node_5'] = model.Node('node_5', 'node_2', 'node_1', 'avg_pool 3x3', 'identity')
   conv_dag['node_6'] = model.Node('node_6', 'node_1', 'node_1', 'avg_pool 3x3', 'avg_pool 3x3')
   conv_dag['node_7'] = model.Node('node_7', 'node_1', 'node_1', 'sep_conv 5x5', 'sep_conv 3x3')
+  conv_dag['loose_ends'] = ['node_1', 'node_3', 'node_4', 'node_5', 'node_6', 'node_7']
 
   reduc_dag = OrderedDict()
   reduc_dag['node_1'] = model.Node('node_1', None, None, None, None)
@@ -79,4 +81,6 @@ def NASNet_A():
   reduc_dag['node_5'] = model.Node('node_5', 'node_2', 'node_1', 'avg_pool 3x3', 'sep_conv 5x5')
   reduc_dag['node_6'] = model.Node('node_6', 'node_2', 'node_3', 'max_pool 3x3', 'sep_conv 3x3')
   reduc_dag['node_7'] = model.Node('node_7', 'node_3', 'node_4', 'avg_pool 3x3', 'identity')
+  reduc_dag['loose_ends'] = ['node_4', 'node_5', 'node_6', 'node_7']
+
   return conv_dag, reduc_dag
