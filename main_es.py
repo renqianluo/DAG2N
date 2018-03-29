@@ -36,6 +36,10 @@ _NUM_IMAGES = {
 parser = argparse.ArgumentParser()
 
 # Basic model parameters.
+parser.add_argument('--mode', type=str, default='train',
+                    choices=['train', 'test'],
+                    help='Train, or test.')
+
 parser.add_argument('--data_dir', type=str, default='/tmp/cifar10_data',
                     help='The path to the CIFAR-10 data directory.')
 
@@ -461,41 +465,54 @@ def main(unused_argv):
   # Using the Winograd non-fused algorithms provides a small performance boost.
   os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 
-  params = get_params(FLAGS.random_sample)
+  if FLAGS.mode == 'train':
+    params = get_params(FLAGS.random_sample)
 
-  with open(os.path.join(FLAGS.model_dir, 'hparams.json'), 'w') as f:
-    json.dump(params, f)
+    with open(os.path.join(FLAGS.model_dir, 'hparams.json'), 'w') as f:
+      json.dump(params, f)
 
-  # Set up a RunConfig to only save checkpoints once per training cycle.
-  run_config = tf.estimator.RunConfig().replace(save_checkpoints_secs=1e9)
-  cifar_classifier = tf.estimator.Estimator(
+    # Set up a RunConfig to only save checkpoints once per training cycle.
+    run_config = tf.estimator.RunConfig().replace(save_checkpoints_secs=1e9)
+    cifar_classifier = tf.estimator.Estimator(
       model_fn=cifar10_model_fn, model_dir=FLAGS.model_dir, config=run_config,
       params=params)
-  for _ in range(FLAGS.train_epochs // FLAGS.epochs_per_eval):
-    tensors_to_log = {
-        'learning_rate': 'learning_rate',
-        'cross_entropy': 'cross_entropy',
-        'train_accuracy': 'train_accuracy'
-    }
+    for _ in range(FLAGS.train_epochs // FLAGS.epochs_per_eval):
+      tensors_to_log = {
+          'learning_rate': 'learning_rate',
+          'cross_entropy': 'cross_entropy',
+          'train_accuracy': 'train_accuracy'
+      }
 
-    logging_hook = tf.train.LoggingTensorHook(
-        tensors=tensors_to_log, every_n_iter=100)
+      logging_hook = tf.train.LoggingTensorHook(
+          tensors=tensors_to_log, every_n_iter=100)
 
-    cifar_classifier.train(
-        input_fn=lambda: input_fn(
-            params['split_train_valid'], 'train', FLAGS.data_dir, params['batch_size'], params['epochs_per_eval']),
-        hooks=[logging_hook])
+      cifar_classifier.train(
+          input_fn=lambda: input_fn(
+              params['split_train_valid'], 'train', FLAGS.data_dir, params['batch_size'], params['epochs_per_eval']),
+          hooks=[logging_hook])
 
-    if params['split_train_valid']:
-      # Valid the model and print results
+      if params['split_train_valid']:
+        # Valid the model and print results
+        eval_results = cifar_classifier.evaluate(
+            input_fn=lambda: input_fn(params['split_train_valid'], 'valid', FLAGS.data_dir, params['batch_size']))
+        tf.logging.info('Evaluation on valid data set')
+        print(eval_results)
+      
+      # Evaluate the model and print results
       eval_results = cifar_classifier.evaluate(
-          input_fn=lambda: input_fn(params['split_train_valid'], 'valid', FLAGS.data_dir, params['batch_size']))
-      tf.logging.info('Evaluation on valid data set')
+          input_fn=lambda: input_fn(params['split_train_valid'], 'test', FLAGS.data_dir, params['batch_size']))
+      tf.logging.info('Evaluation on test data set')
       print(eval_results)
-    
-    # Evaluate the model and print results
+  elif FLAGS.mode == 'test':
+    if not os.path.exists(os.path.join(FLAGS.model_dir, 'hparams.json')):
+      raise ValueError('No hparams.json found in {0}'.format(FLAGS.model_dir))
+    with open(os.path.join(FLAGS.model_dir, 'hparams.json'), 'r') as f:
+      params = json.load(f)
+  
+    cifar_classifier = tf.estimator.Estimator(
+      model_fn=cifar10_model_fn, model_dir=FLAGS.model_dir, params=params)
     eval_results = cifar_classifier.evaluate(
-        input_fn=lambda: input_fn(params['split_train_valid'], 'test', FLAGS.data_dir, params['batch_size']))
+          input_fn=lambda: input_fn(False, 'test', FLAGS.data_dir, params['batch_size']))
     tf.logging.info('Evaluation on test data set')
     print(eval_results)
 
