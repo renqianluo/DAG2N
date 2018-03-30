@@ -78,7 +78,7 @@ def _pooling(operation, inputs, strides, data_format):
   return inputs
 
 
-def _separable_conv2d(operation, inputs, filters, strides, activation, data_format, is_training):
+def _separable_conv2d(operation, inputs, filters, strides, data_format, is_training):
   kernel_size, _ = _operation_to_info(operation)
 
   inputs = tf.nn.relu(inputs) 
@@ -89,8 +89,7 @@ def _separable_conv2d(operation, inputs, filters, strides, activation, data_form
       padding='SAME', use_bias=_USE_BIAS,
       depthwise_initializer=tf.variance_scaling_initializer(),
       pointwise_initializer=tf.variance_scaling_initializer(),
-      data_format=data_format,
-      activation=activation)
+      data_format=data_format)
   with tf.variable_scope('bn_sep_{0}x{0}_{1}'.format(kernel_size, 1)):
     inputs = batch_normalization(inputs, data_format, is_training)
   strides = 1
@@ -103,15 +102,14 @@ def _separable_conv2d(operation, inputs, filters, strides, activation, data_form
       padding='SAME', use_bias=_USE_BIAS,
       depthwise_initializer=tf.variance_scaling_initializer(),
       pointwise_initializer=tf.variance_scaling_initializer(),
-      data_format=data_format,
-      activation=activation)
+      data_format=data_format)
   with tf.variable_scope('bn_sep_{0}x{0}_{1}'.format(kernel_size, 2)):
     inputs = batch_normalization(inputs, data_format, is_training)
 
   return inputs
 
 
-def _dil_separable_conv2d(operation, inputs, filters, strides, activation, data_format, is_training):
+def _dil_separable_conv2d(operation, inputs, filters, strides, data_format, is_training):
   kernel_size, dilation_rate = _operation_to_info(operation)
 
   if not dilation_rate:
@@ -126,8 +124,7 @@ def _dil_separable_conv2d(operation, inputs, filters, strides, activation, data_
       dilation_rate=dilation_rate,
       depthwise_initializer=tf.variance_scaling_initializer(),
       pointwise_initializer=tf.variance_scaling_initializer(),
-      data_format=data_format,
-      activation=activation)
+      data_format=data_format)
   with tf.variable_scope('bn_dil_sep_{0}x{0}_{1}'.format(kernel_size, 1)):
     inputs = batch_normalization(inputs, data_format, is_training)
   strides = 1
@@ -141,15 +138,14 @@ def _dil_separable_conv2d(operation, inputs, filters, strides, activation, data_
       dilation_rate=dilation_rate,
       depthwise_initializer=tf.variance_scaling_initializer(),
       pointwise_initializer=tf.variance_scaling_initializer(),
-      data_format=data_format,
-      activation=activation)
+      data_format=data_format)
   with tf.variable_scope('bn_dil_sep_{0}x{0}_{1}'.format(kernel_size, 2)):
     inputs = batch_normalization(inputs, data_format, is_training)
 
   return inputs
 
 
-def _conv2d(operation, inputs, filters, strides, activation, data_format, is_training):
+def _conv2d(operation, inputs, filters, strides, data_format, is_training):
   kernel_size, _ = _operation_to_info(operation)
   if isinstance(kernel_size, int):
     inputs = tf.nn.relu(inputs)
@@ -158,8 +154,7 @@ def _conv2d(operation, inputs, filters, strides, activation, data_format, is_tra
         inputs=inputs, filters=filters, kernel_size=kernel_size, 
         strides=strides, padding='SAME', use_bias=_USE_BIAS,
         kernel_initializer=tf.variance_scaling_initializer(),
-        data_format=data_format,
-        activation=activation)
+        data_format=data_format)
     with tf.variable_scope('bn_conv_{0}x{0}_{1}'.format(kernel_size, 1)):
       inputs = batch_normalization(inputs, data_format, is_training)
     return inputs
@@ -171,8 +166,7 @@ def _conv2d(operation, inputs, filters, strides, activation, data_format, is_tra
         inputs=inputs, filters=filters, kernel_size=kernel_size1, 
         strides=strides, padding='SAME', use_bias=_USE_BIAS,
         kernel_initializer=tf.variance_scaling_initializer(),
-        data_format=data_format,
-        activation=activation)
+        data_format=data_format)
     with tf.variable_scope('bn_conv_{0}x{1}_{2}'.format(kernel_size1[0], kernel_size1[1], 1)):
       inputs = batch_normalization(inputs, data_format, is_training)
     strides = 1
@@ -184,14 +178,13 @@ def _conv2d(operation, inputs, filters, strides, activation, data_format, is_tra
         inputs=inputs, filters=filters, kernel_size=kernel_size2, 
         strides=strides, padding='SAME', use_bias=_USE_BIAS,
         kernel_initializer=tf.variance_scaling_initializer(),
-        data_format=data_format,
-        activation=activation)
+        data_format=data_format)
     with tf.variable_scope('bn_conv_{0}x{1}_{2}'.format(kernel_size2[0], kernel_size2[1], 2)):
       inputs = batch_normalization(inputs, data_format, is_training)
     return inputs
 
 
-def _dil_conv2d(operation, inputs, filters, strides, activation, data_format, is_training):
+def _dil_conv2d(operation, inputs, filters, strides, data_format, is_training):
   kernel_size, dilation_rate = _operation_to_info(operation)
   inputs = tf.nn.relu(inputs) 
   with tf.variable_scope('dil_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 1)):
@@ -200,8 +193,7 @@ def _dil_conv2d(operation, inputs, filters, strides, activation, data_format, is
       strides=strides, padding='SAME', use_bias=_USE_BIAS,
       dilation_rate=dilation_rate,
       kernel_initializer=tf.variance_scaling_initializer(),
-      data_format=data_format,
-      activation=activation)
+      data_format=data_format)
   with tf.variable_scope('bn_dil_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 1)):
     inputs = batch_normalization(inputs, data_format, is_training)
   
@@ -267,7 +259,7 @@ def _operation_to_pooling_info(operation):
   return pooling_type, pooling_shape
 
 
-def factorized_reduction(inputs, filters, strides, activation, data_format, is_training):
+def factorized_reduction(inputs, filters, strides, data_format, is_training):
   assert filters % 2 == 0, (
     'Need even number of filters when using this factorized reduction')
   if strides == 1:
@@ -276,8 +268,7 @@ def factorized_reduction(inputs, filters, strides, activation, data_format, is_t
         inputs=inputs, filters=filters, kernel_size=1, 
         strides=strides, padding='SAME', use_bias=_USE_BIAS,
         kernel_initializer=tf.variance_scaling_initializer(),
-        data_format=data_format,
-        activation=activation)
+        data_format=data_format)
     with tf.variable_scope('path_bn'):
       inputs = batch_normalization(inputs, data_format, is_training)
     return inputs
@@ -288,8 +279,7 @@ def factorized_reduction(inputs, filters, strides, activation, data_format, is_t
       inputs=path1, filters=int(filters / 2), kernel_size=1, 
       strides=1, padding='SAME', use_bias=_USE_BIAS,
       kernel_initializer=tf.variance_scaling_initializer(),
-      data_format=data_format,
-      activation=activation)
+      data_format=data_format)
 
   if data_format == 'channels_first':
     pad_arr = [[0, 0], [0, 0], [0, 1], [0, 1]]
@@ -304,8 +294,7 @@ def factorized_reduction(inputs, filters, strides, activation, data_format, is_t
       inputs=path2, filters=int(filters / 2), kernel_size=1, 
       strides=1, padding='SAME', use_bias=_USE_BIAS,
       kernel_initializer=tf.variance_scaling_initializer(),
-      data_format=data_format,
-      activation=activation)
+      data_format=data_format)
 
   final_path = tf.concat(values=[path1, path2], axis=get_channel_index(data_format))
   with tf.variable_scope('final_path_bn'):
@@ -327,7 +316,7 @@ def drop_path(inputs, keep_prob, is_training=True):
 
 class ENASCell(object):
   def __init__(self, filters, dag, num_nodes, drop_path_keep_prob, num_cells,
-    total_steps,activation, data_format, is_training):
+    total_steps, data_format, is_training):
     self._filters = filters
     self._dag = dag
     self._num_nodes = num_nodes
@@ -336,7 +325,6 @@ class ENASCell(object):
     self._total_steps = total_steps
     self._is_training = is_training
     self._data_format = data_format
-    self._activation = activation
 
   def _reduce_prev_layer(self, prev_layer, curr_layer):
     if prev_layer is None:
@@ -344,7 +332,6 @@ class ENASCell(object):
 
     curr_num_filters = self._filter_size
     data_format = self._data_format
-    activation = self._activation
     is_training = self._is_training
 
     prev_num_filters = get_channel_dim(prev_layer.shape, data_format)
@@ -352,7 +339,7 @@ class ENASCell(object):
     prev_filter_shape = int(prev_layer.shape[2])
     if curr_filter_shape != prev_filter_shape:
       prev_layer = tf.nn.relu(prev_layer)
-      prev_layer = factorized_reduction(prev_layer, curr_num_filters, 2, activation, data_format, is_training)
+      prev_layer = factorized_reduction(prev_layer, curr_num_filters, 2, data_format, is_training)
     elif curr_num_filters != prev_num_filters:
       prev_layer = tf.nn.relu(prev_layer)
       with tf.variable_scope('prev_1x1'):
@@ -360,8 +347,7 @@ class ENASCell(object):
           inputs=prev_layer, filters=curr_num_filters, kernel_size=1, 
           strides=1, padding='SAME', use_bias=_USE_BIAS,
           kernel_initializer=tf.variance_scaling_initializer(),
-          data_format=data_format,
-          activation=activation)
+          data_format=data_format)
       with tf.variable_scope('prev_bn'):
         prev_layer = batch_normalization(prev_layer, data_format, is_training)
     return prev_layer
@@ -369,7 +355,6 @@ class ENASCell(object):
 
   def _cell_base(self, last_inputs, inputs):
     filters = self._filter_size
-    activation = self._activation
     data_format = self._data_format
     is_training = self._is_training
 
@@ -382,8 +367,7 @@ class ENASCell(object):
           inputs=inputs, filters=filters, kernel_size=1, 
           strides=1, padding='SAME', use_bias=_USE_BIAS,
           kernel_initializer=tf.variance_scaling_initializer(),
-          data_format=data_format,
-          activation=activation)
+          data_format=data_format)
       with tf.variable_scope('beginning_bn'):
         inputs = batch_normalization(inputs, data_format, is_training)
     return last_inputs, inputs
@@ -445,7 +429,6 @@ class ENASCell(object):
 
   def _apply_operation(self, operation, inputs, strides, is_from_original_input):
     filters = self._filter_size
-    activation = self._activation
     data_format = self._data_format
     is_training = self._is_training
 
@@ -453,10 +436,10 @@ class ENASCell(object):
       strides = 1
     input_filters = get_channel_dim(inputs.shape, data_format)
     if 'dil_sep_conv' in operation:
-      inputs = _dil_separable_conv2d(operation, inputs, filters, strides, activation, data_format, is_training)
+      inputs = _dil_separable_conv2d(operation, inputs, filters, strides, data_format, is_training)
     elif 'dil_conv' in operation:
       #dilation > 1 is not compatible with strides > 1, so set strides to 1, and use a 1x1 conv with expected strdies
-      inputs = _dil_conv2d(operation, inputs, filters, 1, activation, data_format, is_training)
+      inputs = _dil_conv2d(operation, inputs, filters, 1, data_format, is_training)
       if strides > 1:
         inputs = tf.nn.relu(inputs)
         with tf.variable_scope('1x1'):
@@ -464,14 +447,13 @@ class ENASCell(object):
             inputs=inputs, filters=filters, kernel_size=1, 
             strides=strides, padding='SAME', use_bias=_USE_BIAS,
             kernel_initializer=tf.variance_scaling_initializer(),
-            data_format=data_format,
-            activation=activation)
+            data_format=data_format,)
         with tf.variable_scope('bn_1'):
           inputs = batch_normalization(inputs, data_format, is_training)
     elif 'sep_conv' in operation:
-      inputs = _separable_conv2d(operation, inputs, filters, strides, activation, data_format, is_training)
+      inputs = _separable_conv2d(operation, inputs, filters, strides, data_format, is_training)
     elif 'conv' in operation:
-      inputs = _conv2d(operation, inputs, filters, strides, activation, data_format, is_training)
+      inputs = _conv2d(operation, inputs, filters, strides, data_format, is_training)
     elif 'identity' in operation:
       if strides > 1 or (input_filters != filters):
         inputs = tf.nn.relu(inputs)
@@ -480,8 +462,7 @@ class ENASCell(object):
             inputs=inputs, filters=filters, kernel_size=1, 
             strides=strides, padding='SAME', use_bias=_USE_BIAS,
             kernel_initializer=tf.variance_scaling_initializer(),
-            data_format=data_format,
-            activation=activation)
+            data_format=data_format)
         with tf.variable_scope('bn_1'):
           inputs = batch_normalization(inputs, data_format, is_training)
     elif 'pool' in operation:
@@ -492,8 +473,7 @@ class ENASCell(object):
             inputs=inputs, filters=filters, kernel_size=1, 
             strides=1, padding='SAME', use_bias=_USE_BIAS,
             kernel_initializer=tf.variance_scaling_initializer(),
-            data_format=data_format,
-            activation=activation)
+            data_format=data_format)
         with tf.variable_scope('bn_1'):
           inputs = batch_normalization(inputs, data_format, is_training)
     else:
@@ -506,7 +486,6 @@ class ENASCell(object):
 
 
   def _combine_unused_states(self, h, loose_nodes):
-    activation = self._activation
     data_format = self._data_format
     is_training = self._is_training
 
@@ -525,7 +504,7 @@ class ENASCell(object):
       if should_reduce:
         strides = 2 if final_height != curr_height else 1
         with tf.variable_scope('reduction_{}'.format(i)):
-          h[node_name] = factorized_reduction(h[node_name], final_filters, strides, activation, data_format, is_training)
+          h[node_name] = factorized_reduction(h[node_name], final_filters, strides, data_format, is_training)
 
     with tf.variable_scope('concat_loose_ends'):
       output = tf.concat([h[name] for name in loose_nodes], axis=get_channel_index(data_format))
@@ -627,12 +606,6 @@ def build_model(inputs, params, is_training, reuse=False):
     drop_path_keep_prob = 1.0
   dense_dropout_keep_prob = params['dense_dropout_keep_prob']
   total_steps = params['total_steps']
-  if params['activation'] is None:
-    activation = None
-  elif params['activation'] == 'relu':
-    activation = tf.nn.relu
-  else:
-    raise ValueError('Unsorported activation function: ', params['activation'])
   if params['data_format'] is None:
     data_format = 'channels_first' if tf.test.is_built_with_cuda() else 'channels_last'
   num_classes = params['num_classes']
@@ -650,9 +623,9 @@ def build_model(inputs, params, is_training, reuse=False):
   total_num_cells = num_cells + 2
 
   convolution_cell = ENASCell(filters, conv_dag, num_nodes, drop_path_keep_prob, total_num_cells,
-    total_steps,activation, data_format, is_training)
+    total_steps, data_format, is_training)
   reduction_cell = ENASCell(filters, reduc_dag, num_nodes, drop_path_keep_prob, total_num_cells,
-    total_steps,activation, data_format, is_training)
+    total_steps, data_format, is_training)
 
   reduction_layers = []
   for pool_num in range(1, 3):
@@ -670,8 +643,7 @@ def build_model(inputs, params, is_training, reuse=False):
         inputs=inputs, filters=int(filters*stem_multiplier), kernel_size=3, strides=1,
         padding='SAME', use_bias=_USE_BIAS,
         kernel_initializer=tf.variance_scaling_initializer(),
-        data_format=data_format,
-        activation=activation)
+        data_format=data_format)
     with tf.variable_scope('layer_1_stem_bn'):
       inputs = batch_normalization(inputs, data_format, is_training)
 
