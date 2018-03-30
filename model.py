@@ -9,7 +9,7 @@ import tensorflow as tf
 _BATCH_NORM_DECAY = 0.9 #0.997
 _BATCH_NORM_EPSILON = 1e-5
 _USE_BIAS = False
-_KERNEL_INITIALIZER=tf.variance_scaling_initializer(mode='FAN_OUT')
+_KERNEL_INITIALIZER=tf.variance_scaling_initializer(mode='fan_out')
 
 _OPERATIONS=[
   'identity',
