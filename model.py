@@ -9,7 +9,7 @@ import tensorflow as tf
 _BATCH_NORM_DECAY = 0.9 #0.997
 _BATCH_NORM_EPSILON = 1e-5
 _USE_BIAS = False
-
+_KERNEL_INITIALIZER=tf.variance_scaling_initializer(mode='FAN_OUT')
 
 _OPERATIONS=[
   'identity',
@@ -87,8 +87,8 @@ def _separable_conv2d(operation, inputs, filters, strides, data_format, is_train
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
       strides=strides, depth_multiplier=1,
       padding='SAME', use_bias=_USE_BIAS,
-      depthwise_initializer=tf.variance_scaling_initializer(),
-      pointwise_initializer=tf.variance_scaling_initializer(),
+      depthwise_initializer=_KERNEL_INITIALIZER,
+      pointwise_initializer=_KERNEL_INITIALIZER,
       data_format=data_format)
   with tf.variable_scope('bn_sep_{0}x{0}_{1}'.format(kernel_size, 1)):
     inputs = batch_normalization(inputs, data_format, is_training)
@@ -100,8 +100,8 @@ def _separable_conv2d(operation, inputs, filters, strides, data_format, is_train
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
       strides=strides, depth_multiplier=1,
       padding='SAME', use_bias=_USE_BIAS,
-      depthwise_initializer=tf.variance_scaling_initializer(),
-      pointwise_initializer=tf.variance_scaling_initializer(),
+      depthwise_initializer=_KERNEL_INITIALIZER,
+      pointwise_initializer=_KERNEL_INITIALIZER,
       data_format=data_format)
   with tf.variable_scope('bn_sep_{0}x{0}_{1}'.format(kernel_size, 2)):
     inputs = batch_normalization(inputs, data_format, is_training)
@@ -122,8 +122,8 @@ def _dil_separable_conv2d(operation, inputs, filters, strides, data_format, is_t
       strides=strides, depth_multiplier=1,
       padding='SAME', use_bias=_USE_BIAS,
       dilation_rate=dilation_rate,
-      depthwise_initializer=tf.variance_scaling_initializer(),
-      pointwise_initializer=tf.variance_scaling_initializer(),
+      depthwise_initializer=_KERNEL_INITIALIZER,
+      pointwise_initializer=_KERNEL_INITIALIZER,
       data_format=data_format)
   with tf.variable_scope('bn_dil_sep_{0}x{0}_{1}'.format(kernel_size, 1)):
     inputs = batch_normalization(inputs, data_format, is_training)
@@ -136,8 +136,8 @@ def _dil_separable_conv2d(operation, inputs, filters, strides, data_format, is_t
       strides=strides, depth_multiplier=1,
       padding='SAME', use_bias=_USE_BIAS,
       dilation_rate=dilation_rate,
-      depthwise_initializer=tf.variance_scaling_initializer(),
-      pointwise_initializer=tf.variance_scaling_initializer(),
+      depthwise_initializer=_KERNEL_INITIALIZER,
+      pointwise_initializer=_KERNEL_INITIALIZER,
       data_format=data_format)
   with tf.variable_scope('bn_dil_sep_{0}x{0}_{1}'.format(kernel_size, 2)):
     inputs = batch_normalization(inputs, data_format, is_training)
@@ -153,7 +153,7 @@ def _conv2d(operation, inputs, filters, strides, data_format, is_training):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=filters, kernel_size=kernel_size, 
         strides=strides, padding='SAME', use_bias=_USE_BIAS,
-        kernel_initializer=tf.variance_scaling_initializer(),
+        kernel_initializer=_KERNEL_INITIALIZER,
         data_format=data_format)
     with tf.variable_scope('bn_conv_{0}x{0}_{1}'.format(kernel_size, 1)):
       inputs = batch_normalization(inputs, data_format, is_training)
@@ -165,7 +165,7 @@ def _conv2d(operation, inputs, filters, strides, data_format, is_training):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=filters, kernel_size=kernel_size1, 
         strides=strides, padding='SAME', use_bias=_USE_BIAS,
-        kernel_initializer=tf.variance_scaling_initializer(),
+        kernel_initializer=_KERNEL_INITIALIZER,
         data_format=data_format)
     with tf.variable_scope('bn_conv_{0}x{1}_{2}'.format(kernel_size1[0], kernel_size1[1], 1)):
       inputs = batch_normalization(inputs, data_format, is_training)
@@ -177,7 +177,7 @@ def _conv2d(operation, inputs, filters, strides, data_format, is_training):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=filters, kernel_size=kernel_size2, 
         strides=strides, padding='SAME', use_bias=_USE_BIAS,
-        kernel_initializer=tf.variance_scaling_initializer(),
+        kernel_initializer=_KERNEL_INITIALIZER,
         data_format=data_format)
     with tf.variable_scope('bn_conv_{0}x{1}_{2}'.format(kernel_size2[0], kernel_size2[1], 2)):
       inputs = batch_normalization(inputs, data_format, is_training)
@@ -192,7 +192,7 @@ def _dil_conv2d(operation, inputs, filters, strides, data_format, is_training):
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
       strides=strides, padding='SAME', use_bias=_USE_BIAS,
       dilation_rate=dilation_rate,
-      kernel_initializer=tf.variance_scaling_initializer(),
+      kernel_initializer=_KERNEL_INITIALIZER,
       data_format=data_format)
   with tf.variable_scope('bn_dil_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 1)):
     inputs = batch_normalization(inputs, data_format, is_training)
@@ -267,7 +267,7 @@ def factorized_reduction(inputs, filters, strides, data_format, is_training):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=filters, kernel_size=1, 
         strides=strides, padding='SAME', use_bias=_USE_BIAS,
-        kernel_initializer=tf.variance_scaling_initializer(),
+        kernel_initializer=_KERNEL_INITIALIZER,
         data_format=data_format)
     with tf.variable_scope('path_bn'):
       inputs = batch_normalization(inputs, data_format, is_training)
@@ -278,7 +278,7 @@ def factorized_reduction(inputs, filters, strides, data_format, is_training):
     path1 = tf.layers.conv2d(
       inputs=path1, filters=int(filters / 2), kernel_size=1, 
       strides=1, padding='SAME', use_bias=_USE_BIAS,
-      kernel_initializer=tf.variance_scaling_initializer(),
+      kernel_initializer=_KERNEL_INITIALIZER,
       data_format=data_format)
 
   if data_format == 'channels_first':
@@ -293,7 +293,7 @@ def factorized_reduction(inputs, filters, strides, data_format, is_training):
     path2 = tf.layers.conv2d(
       inputs=path2, filters=int(filters / 2), kernel_size=1, 
       strides=1, padding='SAME', use_bias=_USE_BIAS,
-      kernel_initializer=tf.variance_scaling_initializer(),
+      kernel_initializer=_KERNEL_INITIALIZER,
       data_format=data_format)
 
   final_path = tf.concat(values=[path1, path2], axis=get_channel_index(data_format))
@@ -346,7 +346,7 @@ class ENASCell(object):
         prev_layer = tf.layers.conv2d(
           inputs=prev_layer, filters=curr_num_filters, kernel_size=1, 
           strides=1, padding='SAME', use_bias=_USE_BIAS,
-          kernel_initializer=tf.variance_scaling_initializer(),
+          kernel_initializer=_KERNEL_INITIALIZER,
           data_format=data_format)
       with tf.variable_scope('prev_bn'):
         prev_layer = batch_normalization(prev_layer, data_format, is_training)
@@ -366,7 +366,7 @@ class ENASCell(object):
         inputs = tf.layers.conv2d(
           inputs=inputs, filters=filters, kernel_size=1, 
           strides=1, padding='SAME', use_bias=_USE_BIAS,
-          kernel_initializer=tf.variance_scaling_initializer(),
+          kernel_initializer=_KERNEL_INITIALIZER,
           data_format=data_format)
       with tf.variable_scope('beginning_bn'):
         inputs = batch_normalization(inputs, data_format, is_training)
@@ -446,7 +446,7 @@ class ENASCell(object):
           inputs = tf.layers.conv2d(
             inputs=inputs, filters=filters, kernel_size=1, 
             strides=strides, padding='SAME', use_bias=_USE_BIAS,
-            kernel_initializer=tf.variance_scaling_initializer(),
+            kernel_initializer=_KERNEL_INITIALIZER,
             data_format=data_format,)
         with tf.variable_scope('bn_1'):
           inputs = batch_normalization(inputs, data_format, is_training)
@@ -461,7 +461,7 @@ class ENASCell(object):
           inputs = tf.layers.conv2d(
             inputs=inputs, filters=filters, kernel_size=1, 
             strides=strides, padding='SAME', use_bias=_USE_BIAS,
-            kernel_initializer=tf.variance_scaling_initializer(),
+            kernel_initializer=_KERNEL_INITIALIZER,
             data_format=data_format)
         with tf.variable_scope('bn_1'):
           inputs = batch_normalization(inputs, data_format, is_training)
@@ -472,7 +472,7 @@ class ENASCell(object):
           inputs = tf.layers.conv2d(
             inputs=inputs, filters=filters, kernel_size=1, 
             strides=1, padding='SAME', use_bias=_USE_BIAS,
-            kernel_initializer=tf.variance_scaling_initializer(),
+            kernel_initializer=_KERNEL_INITIALIZER,
             data_format=data_format)
         with tf.variable_scope('bn_1'):
           inputs = batch_normalization(inputs, data_format, is_training)
@@ -552,7 +552,7 @@ def _build_aux_head(aux_net, num_classes, params, data_format, is_training):
       aux_logits = tf.layers.conv2d(
         inputs=aux_logits, filters=128, kernel_size=1, 
         strides=1, padding='SAME', use_bias=_USE_BIAS,
-        kernel_initializer=tf.variance_scaling_initializer(), 
+        kernel_initializer=_KERNEL_INITIALIZER, 
         data_format=data_format)
       with tf.variable_scope('aux_bn0'):
         aux_logits = batch_normalization(aux_logits, data_format, is_training)
@@ -565,7 +565,7 @@ def _build_aux_head(aux_net, num_classes, params, data_format, is_training):
       aux_logits = tf.layers.conv2d(
         inputs=aux_logits, filters=768, kernel_size=shape, 
         strides=1, padding='VALID', use_bias=_USE_BIAS, 
-        kernel_initializer=tf.variance_scaling_initializer(), 
+        kernel_initializer=_KERNEL_INITIALIZER, 
         data_format=data_format)
       with tf.variable_scope('aux_bn1'):
         aux_logits = batch_normalization(aux_logits, data_format, is_training)
@@ -642,7 +642,7 @@ def build_model(inputs, params, is_training, reuse=False):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=int(filters*stem_multiplier), kernel_size=3, strides=1,
         padding='SAME', use_bias=_USE_BIAS,
-        kernel_initializer=tf.variance_scaling_initializer(),
+        kernel_initializer=_KERNEL_INITIALIZER,
         data_format=data_format)
     with tf.variable_scope('layer_1_stem_bn'):
       inputs = batch_normalization(inputs, data_format, is_training)
