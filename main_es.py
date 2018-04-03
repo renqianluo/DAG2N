@@ -325,7 +325,7 @@ def cifar10_model_fn(features, labels, mode, params):
         cur_i = tf.floor(cur_epoch / T_0)
         T_beg = T_0 * cur_i
       else:
-        cur_i = tf.ceil(tf.log((T_mul - 1.0) * (cur_epoch / T_0 + 1.0)) / tf.log(2.0) - 1.0)
+        cur_i = tf.ceil(tf.log((T_mul - 1.0) * (cur_epoch / T_0 + 1.0)) / tf.log(2.0))
         T_beg = T_0 * (tf.pow(T_mul, cur_i) - 1.0) / (T_mul - 1.0)
         T_i = T_0 * tf.pow(T_mul, cur_i)
       
