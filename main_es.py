@@ -435,8 +435,8 @@ def random_pick(sample_list, probs=None):
 
 def get_params(random_sample):
   if random_sample:
-    FLAGS.drop_path_keep_prob = random_pick([0.5, 0.6, 0.7])
-    FLAGS.filters = random_pick([36, 64, 128], [0.4, 0.4, 0.2])
+    FLAGS.drop_path_keep_prob = random_pick([0.6, 0.7])
+    FLAGS.dense_dropout_keep_prob = random_pick([0.8, 0.9, 1.0])
  
   conv_dag, reduc_dag = build_dag(random_sample, FLAGS.dag)
   
@@ -457,7 +457,6 @@ def get_params(random_sample):
     for k,v in old_params:
       if 'dag' in k or 'filters' in k or 'drop' in k:
         params[k] = v
-
   
   return params 
 
