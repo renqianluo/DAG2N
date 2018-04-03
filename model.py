@@ -634,7 +634,7 @@ def build_model(inputs, params, is_training, reuse=False):
     reduction_layers.append(layer_num)
 
   if len(reduction_layers) >= 2:
-    aux_head_ceill_index = reduction_layers[1] - 1
+    aux_head_ceill_index = reduction_layers[1]  #- 1
 
   with tf.variable_scope('body', reuse=reuse):
     last_inputs = None
