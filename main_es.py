@@ -317,9 +317,10 @@ def cifar10_model_fn(features, labels, mode, params):
       lr_min = params['lr_min']
       T_0 = tf.constant(params['T_0'], dtype=tf.float32)
       T_mul = tf.constant(params['T_mul'], dtype=tf.float32)
-      batches_per_epoch = math.ceil(num_images / params['batch_size'])
+      #batches_per_epoch = math.ceil(num_images / params['batch_size'])
+      batches_per_epoch = num_images / params['batch_size']
       
-      cur_epoch = (tf.cast(global_step, dtype=tf.float32) + 1) / batches_per_epoch
+      cur_epoch = tf.floor(tf.cast(global_step, dtype=tf.float32) / batches_per_epoch)
       if params['T_mul'] == 1:
         cur_i = tf.floor(cur_epoch / T_0)
         T_beg = T_0 * cur_i

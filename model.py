@@ -468,6 +468,7 @@ class ENASCell(object):
     elif 'pool' in operation:
       inputs = _pooling(operation, inputs, strides, data_format)
       if input_filters != filters:
+        inputs = tf.nn.relu(inputs)
         with tf.variable_scope('1x1'):
           inputs = tf.layers.conv2d(
             inputs=inputs, filters=filters, kernel_size=1, 
@@ -488,9 +489,9 @@ class ENASCell(object):
   def _combine_unused_states(self, h, loose_nodes):
     data_format = self._data_format
     is_training = self._is_training
+    filters = self._filter_size
 
-    final_height = int(h['node_%d'%self._num_nodes].shape[2])
-    final_filters = get_channel_dim(h['node_%d'%self._num_nodes].shape, data_format)
+    out_height = min([int(h[name].shape[2]) for name in loose_nodes])
 
     for i in range(1, self._num_nodes+1):
       node_name = 'node_%d'%i
@@ -498,13 +499,13 @@ class ENASCell(object):
       curr_filters = get_channel_dim(h[node_name].shape, data_format)
 
       # Determine if a reduction should be applied to make the number of filters match.
-      should_reduce = final_filters != curr_filters
-      should_reduce = (final_height != curr_height) or should_reduce
-      should_reduce = should_reduce and node_name in loose_nodes
+      should_reduce = filters != curr_filters
+      should_reduce = (out_height != curr_height) or should_reduce
+      should_reduce = should_reduce and (node_name in loose_nodes)
       if should_reduce:
-        strides = 2 if final_height != curr_height else 1
+        strides = 2 if out_height != curr_height else 1
         with tf.variable_scope('reduction_{}'.format(i)):
-          h[node_name] = factorized_reduction(h[node_name], final_filters, strides, data_format, is_training)
+          h[node_name] = factorized_reduction(h[node_name], filters, strides, data_format, is_training)
 
     with tf.variable_scope('concat_loose_ends'):
       output = tf.concat([h[name] for name in loose_nodes], axis=get_channel_index(data_format))
@@ -544,19 +545,20 @@ class ENASCell(object):
 
 def _build_aux_head(aux_net, num_classes, params, data_format, is_training):
   with tf.variable_scope('aux_head'):
-    aux_logits = tf.identity(aux_net)
-    with tf.variable_scope('aux_logits'):
-      aux_logits = tf.layers.average_pooling2d(
-        inputs=aux_logits, 
-        pool_size=5, strides=3, padding='VALID', data_format=data_format)
+    aux_logits = tf.nn.relu(aux_net)
+    aux_logits = tf.layers.average_pooling2d(
+      inputs=aux_logits, 
+      pool_size=5, strides=3, padding='VALID', data_format=data_format)
+    with tf.variable_scope('proj'):
       aux_logits = tf.layers.conv2d(
         inputs=aux_logits, filters=128, kernel_size=1, 
         strides=1, padding='SAME', use_bias=_USE_BIAS,
         kernel_initializer=_KERNEL_INITIALIZER, 
         data_format=data_format)
-      with tf.variable_scope('aux_bn0'):
-        aux_logits = batch_normalization(aux_logits, data_format, is_training)
+      aux_logits = batch_normalization(aux_logits, data_format, is_training)
       aux_logits = tf.nn.relu(aux_logits)
+      
+    with tf.variable_scope('avg_pool'):
       shape = aux_logits.shape
       if data_format == 'channels_first':
         shape = shape[2:4]
@@ -567,10 +569,14 @@ def _build_aux_head(aux_net, num_classes, params, data_format, is_training):
         strides=1, padding='VALID', use_bias=_USE_BIAS, 
         kernel_initializer=_KERNEL_INITIALIZER, 
         data_format=data_format)
-      with tf.variable_scope('aux_bn1'):
-        aux_logits = batch_normalization(aux_logits, data_format, is_training)
+      aux_logits = batch_normalization(aux_logits, data_format, is_training)
       aux_logits = tf.nn.relu(aux_logits)
-      aux_logits = tf.layers.flatten(aux_logits)
+
+    with tf.variable_scope('fc'):
+      if data_format == 'channels_first':
+        aux_logits = tf.reduce_mean(aux_logits, axis=[2,3])
+      else:
+        aux_logits = tf.reduce_mean(aux_logits, axis=[1,2])
       aux_logits = tf.layers.dense(inputs=aux_logits, units=num_classes)
   return aux_logits
 
