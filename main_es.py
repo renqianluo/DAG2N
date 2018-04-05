@@ -46,8 +46,8 @@ parser.add_argument('--data_dir', type=str, default='/tmp/cifar10_data',
 parser.add_argument('--model_dir', type=str, default='/tmp/cifar10_model',
                     help='The directory where the model will be stored.')
 
-parser.add_argument('--restore', action='store_true', default=False,
-                    help='Restore from a configuration params.')
+parser.add_argument('--previous_steps', type=int, default=0,
+                    help='Previous steps when restored.')
 
 parser.add_argument('--num_nodes', type=int, default=7,
                     help='The number of nodes in a cell.')
@@ -76,12 +76,11 @@ parser.add_argument('--epochs_per_eval', type=int, default=10,
 parser.add_argument('--batch_size', type=int, default=128,
                     help='The number of images per batch.')
 
-parser.add_argument('--random_sample', action='store_true', default=False,
-                    help='Random sample a structure and hyper to run.')
-
 parser.add_argument('--dag', type=str, default=None,
-                    choices=['ENAS', 'NASNet_A', 'AmoebaNet_A', 'AmoebaNet_B'],
                     help='Default dag to run.')
+
+parser.add_argument('--hparams', type=str, default=None,
+                    help='hparams file. All the params will be overrided by this file.')
 
 parser.add_argument('--split_train_valid', action='store_true', default=False,
                     help='Split training data to train set and valid set.')
@@ -324,6 +323,7 @@ def cifar10_model_fn(features, labels, mode, params):
       if params['T_mul'] == 1:
         cur_i = tf.floor(cur_epoch / T_0)
         T_beg = T_0 * cur_i
+        T_i = T_0
       else:
         cur_i = tf.ceil(tf.log((T_mul - 1.0) * (cur_epoch / T_0 + 1.0)) / tf.log(2.0))
         T_beg = T_0 * (tf.pow(T_mul, cur_i) - 1.0) / (T_mul - 1.0)
@@ -339,16 +339,6 @@ def cifar10_model_fn(features, labels, mode, params):
         tf.cast(global_step, tf.int32), boundaries, values)
     else:
       learning_rate = params['lr']
-    """
-    initial_learning_rate = 0.1 * params['batch_size'] / 128
-    batches_per_epoch = _NUM_IMAGES['train'] / params['batch_size']
-    global_step = tf.train.get_or_create_global_step()
-    # Multiply the learning rate by 0.1 at 100, 150, and 200 epochs.
-    boundaries = [int(batches_per_epoch * epoch) for epoch in [100, 150, 200]]
-    values = [initial_learning_rate * decay for decay in [1, 0.1, 0.01, 0.001]]
-    learning_rate = tf.train.piecewise_constant(
-      tf.cast(global_step, tf.int32), boundaries, values)
-    """
 
     # Create a tensor named learning_rate for logging purposes
     tf.identity(learning_rate, name='learning_rate')
@@ -385,60 +375,21 @@ def cifar10_model_fn(features, labels, mode, params):
       eval_metric_ops=metrics)
 
 
-def get_dag(num_nodes, cell='conv_dag'):
-  dag = OrderedDict()
-  operations = list(model._OPERATIONS)
-  num_operations = len(operations)
-  for i in xrange(1, num_nodes+1):
-    name = 'node_%d' % i
-    if i == 1 or i == 2:
-      node = [name, None, None, None, None]
-    else:
-      p_node_1 = 'node_%d' % random.randint(1, i-1) 
-      p_node_2 = 'node_%d' % random.randint(1, i-1)
-      op1 = operations[random.randint(0, num_operations-1)]  
-      op2 = operations[random.randint(0, num_operations-1)]  
-      node = [name, p_node_1, p_node_2, op1, op2]
-    dag[name] = node
-  return dag
-
-
-def build_dag(random_sample, name):
-  if random_sample:
-    conv_dag = get_dag(FLAGS.num_nodes, 'conv_dag')
-    reduc_dag = get_dag(FLAGS.num_nodes, 'reduc_dag') 
-  else:
-    if name == 'ENAS':
-      conv_dag, reduc_dag = dag.ENAS()
-    elif name == 'NASNet_A':
-      conv_dag, reduc_dag = dag.NASNet_A()
-    elif name == 'AmoebaNet_A':
-      conv_dag, reduc_dag = dag.AmoebaNet_A()
-    elif name == 'AmoebaNet_B':
-      conv_dag, reduc_dag = dag.AmoebaNet_B()
+def build_dag(dag_name_or_path):
+  if dag_name_or_path == 'ENAS':
+    conv_dag, reduc_dag = dag.ENAS()
+  elif dag_name_or_path == 'NASNet_A':
+    conv_dag, reduc_dag = dag.NASNet_A()
+  elif dag_name_or_path == 'AmoebaNet_A':
+    conv_dag, reduc_dag = dag.AmoebaNet_A()
+  elif dag_name_or_path == 'AmoebaNet_B':
+    conv_dag, reduc_dag = dag.AmoebaNet_B()    
 
   return conv_dag, reduc_dag
 
 
-def random_pick(sample_list, probs=None):
-  if probs is not None:
-    x = random.uniform(0, 1)
-    cumulative_prob = 0.0
-    for item, item_prob in zip(sample_list, probs):
-      cumulative_prob += item_prob
-      if x < cumulative_prob:
-        break
-    return item
-  else:
-    return random.sample(sample_list, 1)[0]
-
-
-def get_params(random_sample):
-  if random_sample:
-    FLAGS.drop_path_keep_prob = random_pick([0.6, 0.7])
-    FLAGS.dense_dropout_keep_prob = random_pick([0.8, 0.9, 1.0])
- 
-  conv_dag, reduc_dag = build_dag(random_sample, FLAGS.dag)
+def get_params():
+  conv_dag, reduc_dag = build_dag(FLAGS.dag)
   
   if FLAGS.split_train_valid:
     total_steps = int(FLAGS.train_epochs * _NUM_IMAGES['train'] / float(FLAGS.batch_size))
@@ -451,12 +402,10 @@ def get_params(random_sample):
   params['reduc_dag'] = reduc_dag
   params['total_steps'] = total_steps
 
-  if FLAGS.restore:
-    with open(os.path.join(FLAGS.model_dir, 'hparams.json'), 'r') as f:
-      old_params = json.load(f)
-    for k,v in old_params:
-      if 'dag' in k or 'filters' in k or 'drop' in k:
-        params[k] = v
+  if FLAGS.hparams is not None:
+    with open(os.path.join(FLAGS.model_dir, FLAGS.hparams), 'r') as f:
+      hparams = json.load(f)
+      params.update(hparams)
   
   return params 
 
@@ -466,17 +415,29 @@ def main(unused_argv):
   os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 
   if FLAGS.mode == 'train':
-    params = get_params(FLAGS.random_sample)
+    params = get_params()
 
-    with open(os.path.join(FLAGS.model_dir, 'hparams.json'), 'w') as f:
+    with open(os.path.join(params['model_dir'], 'hparams.json'), 'w') as f:
       json.dump(params, f)
+    
+    if os.path.exists(os.path.join(params['model_dir'], 'checkpoint')):
+      with open(os.path.join(params['model_dir'], 'checkpoint'), 'r') as f:
+        line = f.readline()
+        line = line.strip().split(' ')[-1]
+        line = line.split('-')[-1][:-1]
+        previous_step = int(line)
+        num_images = _NUM_IMAGES['train'] if params['split_train_valid'] else _NUM_IMAGES['train'] + _NUM_IMAGES['valid']
+        batches_per_epoch = num_images / params['batch_size']
+        start_epoch_loop = int(previous_step / batches_per_epoch // FLAGS.epochs_per_eval)
+    else:
+      start_epoch_loop = 0
 
     # Set up a RunConfig to only save checkpoints once per training cycle.
     run_config = tf.estimator.RunConfig().replace(save_checkpoints_secs=1e9)
     cifar_classifier = tf.estimator.Estimator(
-      model_fn=cifar10_model_fn, model_dir=FLAGS.model_dir, config=run_config,
+      model_fn=cifar10_model_fn, model_dir=params['model_dir'], config=run_config,
       params=params)
-    for _ in range(FLAGS.train_epochs // FLAGS.epochs_per_eval):
+    for _ in range(start_epoch_loop, params['train_epochs'] // params['epochs_per_eval']):
       tensors_to_log = {
           'learning_rate': 'learning_rate',
           'cross_entropy': 'cross_entropy',
@@ -488,19 +449,19 @@ def main(unused_argv):
 
       cifar_classifier.train(
           input_fn=lambda: input_fn(
-              params['split_train_valid'], 'train', FLAGS.data_dir, params['batch_size'], params['epochs_per_eval']),
+              params['split_train_valid'], 'train', params['data_dir'], params['batch_size'], params['epochs_per_eval']),
           hooks=[logging_hook])
 
       if params['split_train_valid']:
         # Valid the model and print results
         eval_results = cifar_classifier.evaluate(
-            input_fn=lambda: input_fn(params['split_train_valid'], 'valid', FLAGS.data_dir, params['batch_size']))
+            input_fn=lambda: input_fn(params['split_train_valid'], 'valid', params['data_dir'], params['batch_size']))
         tf.logging.info('Evaluation on valid data set')
         print(eval_results)
       
       # Evaluate the model and print results
       eval_results = cifar_classifier.evaluate(
-          input_fn=lambda: input_fn(params['split_train_valid'], 'test', FLAGS.data_dir, params['batch_size']))
+          input_fn=lambda: input_fn(params['split_train_valid'], 'test', params['data_dir'], params['batch_size']))
       tf.logging.info('Evaluation on test data set')
       print(eval_results)
   elif FLAGS.mode == 'test':
