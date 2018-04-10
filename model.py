@@ -4,7 +4,6 @@ from __future__ import print_function
 
 from six.moves import xrange
 from collections import namedtuple, OrderedDict
-import utils
 import tensorflow as tf
 
 _BATCH_NORM_DECAY = 0.9 #0.997
@@ -12,13 +11,13 @@ _BATCH_NORM_EPSILON = 1e-5
 _USE_BIAS = False
 _KERNEL_INITIALIZER=tf.variance_scaling_initializer(mode='fan_out')
 
-def get_channel_dim(shape, data_format='INVALID'):
+def get_channel_dim(x, data_format='INVALID'):
   assert data_format != 'INVALID'
-  assert len(shape) == 4
+  assert x.shape.ndims == 4
   if data_format == 'channels_first':
-    return int(shape[1])
+    return x.shape[1].value
   else:
-    return int(shape[3])
+    return x.shape[3].value
 
 
 def get_channel_index(data_format='INVALID'):
@@ -310,7 +309,7 @@ class ENASCell(object):
     data_format = self._data_format
     is_training = self._is_training
 
-    prev_num_filters = get_channel_dim(prev_layer.shape, data_format)
+    prev_num_filters = get_channel_dim(prev_layer, data_format)
     curr_filter_shape = int(curr_layer.shape[2])
     prev_filter_shape = int(prev_layer.shape[2])
     if curr_filter_shape != prev_filter_shape:
@@ -344,7 +343,7 @@ class ENASCell(object):
           strides=1, padding='SAME', use_bias=_USE_BIAS,
           kernel_initializer=_KERNEL_INITIALIZER,
           data_format=data_format)
-      with tf.variable_scope('beginning_bn'):
+      with tf.variable_scope('bn'):
         inputs = batch_normalization(inputs, data_format, is_training)
     return last_inputs, inputs
 
@@ -361,7 +360,6 @@ class ENASCell(object):
     # node 1 and node 2 are last_inputs and inputs respectively
     # begin processing from node 3
 
-    curr_inputs = inputs
     last_inputs, inputs = self._cell_base(last_inputs, inputs)
 
     h = {}
@@ -390,8 +388,8 @@ class ENASCell(object):
         with tf.variable_scope('input_2'):
           is_from_original_input = int(previous_node_2.split('_')[-1]) < 3
           h2 = self._apply_operation(operation_2, h2, strides, is_from_original_input)
-        with tf.variable_scope('combine'):
-          output = h1 + h2
+        
+        output = h1 + h2
         h[name] = output
 
     if 'loose_ends' in dag:
@@ -400,7 +398,7 @@ class ENASCell(object):
     with tf.variable_scope('cell_output'):
       output = self._combine_unused_states(h, loose_ends)
     
-    return curr_inputs, output
+    return output
 
 
   def _apply_operation(self, operation, inputs, strides, is_from_original_input):
@@ -410,7 +408,7 @@ class ENASCell(object):
 
     if strides > 1 and not is_from_original_input:
       strides = 1
-    input_filters = get_channel_dim(inputs.shape, data_format)
+    input_filters = get_channel_dim(inputs, data_format)
     if 'dil_sep_conv' in operation:
       inputs = _dil_separable_conv2d(operation, inputs, filters, strides, data_format, is_training)
     elif 'dil_conv' in operation:
@@ -424,7 +422,7 @@ class ENASCell(object):
             strides=strides, padding='SAME', use_bias=_USE_BIAS,
             kernel_initializer=_KERNEL_INITIALIZER,
             data_format=data_format,)
-        with tf.variable_scope('bn_1'):
+        with tf.variable_scope('bn'):
           inputs = batch_normalization(inputs, data_format, is_training)
     elif 'sep_conv' in operation:
       inputs = _separable_conv2d(operation, inputs, filters, strides, data_format, is_training)
@@ -439,7 +437,7 @@ class ENASCell(object):
             strides=strides, padding='SAME', use_bias=_USE_BIAS,
             kernel_initializer=_KERNEL_INITIALIZER,
             data_format=data_format)
-        with tf.variable_scope('bn_1'):
+        with tf.variable_scope('bn'):
           inputs = batch_normalization(inputs, data_format, is_training)
     elif 'pool' in operation:
       inputs = _pooling(operation, inputs, strides, data_format)
@@ -451,7 +449,7 @@ class ENASCell(object):
             strides=1, padding='SAME', use_bias=_USE_BIAS,
             kernel_initializer=_KERNEL_INITIALIZER,
             data_format=data_format)
-        with tf.variable_scope('bn_1'):
+        with tf.variable_scope('bn'):
           inputs = batch_normalization(inputs, data_format, is_training)
     else:
       raise ValueError('Unimplemented operation', operation)
@@ -472,7 +470,7 @@ class ENASCell(object):
     for i in range(1, self._num_nodes+1):
       node_name = 'node_%d'%i
       curr_height = int(h[node_name].shape[2])
-      curr_filters = get_channel_dim(h[node_name].shape, data_format)
+      curr_filters = get_channel_dim(h[node_name], data_format)
 
       # Determine if a reduction should be applied to make the number of filters match.
       should_reduce = filters != curr_filters
@@ -483,8 +481,7 @@ class ENASCell(object):
         with tf.variable_scope('reduction_{}'.format(i)):
           h[node_name] = factorized_reduction(h[node_name], filters, strides, data_format, is_training)
 
-    with tf.variable_scope('concat_loose_ends'):
-      output = tf.concat([h[name] for name in loose_nodes], axis=get_channel_index(data_format))
+    output = tf.concat([h[name] for name in loose_nodes], axis=get_channel_index(data_format))
     return output
 
   def _apply_drop_path(self, inputs, is_training, current_step=None, use_summaries=False, drop_connect_version='v3'):
@@ -553,7 +550,7 @@ def _build_aux_head(aux_net, num_classes, params, data_format, is_training):
         aux_logits = tf.reduce_mean(aux_logits, axis=[2,3])
       else:
         aux_logits = tf.reduce_mean(aux_logits, axis=[1,2])
-      aux_logits = tf.layers.dense(inputs=aux_logits, units=num_classes)
+      aux_logits = tf.layers.dense(inputs=aux_logits, units=num_classes, use_bias=_USE_BIAS)
   return aux_logits
 
 
@@ -619,7 +616,6 @@ def build_model(inputs, params, is_training, reuse=False):
     aux_head_ceill_index = reduction_layers[1]  #- 1
 
   with tf.variable_scope('body', reuse=reuse):
-    last_inputs = None
     with tf.variable_scope('layer_1_stem_conv_3x3'):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=int(filters*stem_multiplier), kernel_size=3, strides=1,
@@ -629,6 +625,8 @@ def build_model(inputs, params, is_training, reuse=False):
     with tf.variable_scope('layer_1_stem_bn'):
       inputs = batch_normalization(inputs, data_format, is_training)
 
+    layers = [None, inputs]
+
     true_cell_num, filter_scaling = 0, 1
 
     for cell_num in range(num_cells):
@@ -636,14 +634,15 @@ def build_model(inputs, params, is_training, reuse=False):
       if cell_num in reduction_layers:
         filter_scaling *= 2
         with tf.variable_scope('reduction_cell_%d' % (reduction_layers.index(cell_num)+1)):
-          last_inputs, inputs = reduction_cell(inputs, filter_scaling, 2, last_inputs, true_cell_num)
+          inputs = reduction_cell(layers[-1], filter_scaling, 2, layers[-2], true_cell_num)
+        layers.append(inputs)
         true_cell_num += 1
       with tf.variable_scope('convolution_cell_%d' % (cell_num+1)):
-        last_inputs, inputs = convolution_cell(inputs, filter_scaling, strides, last_inputs, true_cell_num)
+        inputs = convolution_cell(layers[-1], filter_scaling, strides, layers[-2], true_cell_num)
+      layers.append(inputs)
       true_cell_num += 1
       if use_aux_head and aux_head_ceill_index == cell_num and num_classes and is_training:
-        aux_net = tf.nn.relu(inputs)
-        aux_logits = _build_aux_head(aux_net, num_classes, params, data_format, is_training)
+        aux_logits = _build_aux_head(inputs, num_classes, params, data_format, is_training)
 
     inputs = tf.nn.relu(inputs)
 
@@ -659,7 +658,7 @@ def build_model(inputs, params, is_training, reuse=False):
     inputs = tf.layers.dropout(inputs, 1 - dense_dropout_keep_prob, training=is_training)
 
     with tf.variable_scope('fully_connected_layer'):
-      inputs = tf.layers.dense(inputs=inputs, units=num_classes)
+      inputs = tf.layers.dense(inputs=inputs, units=num_classes, use_bias=_USE_BIAS)
 
   res = {'logits': inputs}
   if use_aux_head and is_training:

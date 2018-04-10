@@ -303,9 +303,6 @@ def cifar10_model_fn(features, labels, mode, params):
       logits=aux_logits, onehot_labels=labels, weights=params['aux_head_weight'])
     loss += aux_loss
 
-
-  _log_variable_sizes(tf.trainable_variables(), "Trainable Variables")
-
   if mode == tf.estimator.ModeKeys.TRAIN:
     global_step = tf.train.get_or_create_global_step()
 
@@ -316,8 +313,7 @@ def cifar10_model_fn(features, labels, mode, params):
       lr_min = params['lr_min']
       T_0 = tf.constant(params['T_0'], dtype=tf.float32)
       T_mul = tf.constant(params['T_mul'], dtype=tf.float32)
-      #batches_per_epoch = math.ceil(num_images / params['batch_size'])
-      batches_per_epoch = num_images / params['batch_size']
+      batches_per_epoch = math.ceil(num_images / params['batch_size'])
       
       cur_epoch = tf.floor(tf.cast(global_step, dtype=tf.float32) / batches_per_epoch)
       if params['T_mul'] == 1:
@@ -376,14 +372,10 @@ def cifar10_model_fn(features, labels, mode, params):
 
 
 def build_dag(dag_name_or_path):
-  if dag_name_or_path == 'ENAS':
-    conv_dag, reduc_dag = dag.ENAS()
-  elif dag_name_or_path == 'NASNet_A':
-    conv_dag, reduc_dag = dag.NASNet_A()
-  elif dag_name_or_path == 'AmoebaNet_A':
-    conv_dag, reduc_dag = dag.AmoebaNet_A()
-  elif dag_name_or_path == 'AmoebaNet_B':
-    conv_dag, reduc_dag = dag.AmoebaNet_B()    
+  try:
+    conv_dag, reduc_dag = eval('dag.{}()'.format(dag_name_or_path))
+  except:
+    conv_dag, reduc_dag = None, None
 
   return conv_dag, reduc_dag
 
@@ -403,9 +395,12 @@ def get_params():
   params['total_steps'] = total_steps
 
   if FLAGS.hparams is not None:
-    with open(os.path.join(FLAGS.model_dir, FLAGS.hparams), 'r') as f:
+    with open(os.path.join(FLAGS.hparams), 'r') as f:
       hparams = json.load(f)
       params.update(hparams)
+ 
+  if params['conv_dag'] is None or params['reduc_dag'] is None:
+    raise ValueError('You muse specify a registered model name or provide a model in the hparams.')
   
   return params 
 
@@ -416,6 +411,12 @@ def main(unused_argv):
 
   if FLAGS.mode == 'train':
     params = get_params()
+
+    cifar10_model_fn(tf.zeors([32 ,32 ,32 ,3]),
+      tf.one_hot(tf.ones([32], dtype=tf.uint8), _NUM_CLASSES),
+      tf.estimator.ModeKeys.TRAIN, params)
+
+    _log_variable_sizes(tf.trainable_variables(), 'Trainable Variables')
 
     with open(os.path.join(params['model_dir'], 'hparams.json'), 'w') as f:
       json.dump(params, f)
