@@ -412,7 +412,7 @@ def main(unused_argv):
   if FLAGS.mode == 'train':
     params = get_params()
 
-    cifar10_model_fn(tf.zeors([32 ,32 ,32 ,3]),
+    cifar10_model_fn(tf.zeros([32 ,32 ,32 ,3]),
       tf.one_hot(tf.ones([32], dtype=tf.uint8), _NUM_CLASSES),
       tf.estimator.ModeKeys.TRAIN, params)
 
