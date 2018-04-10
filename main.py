@@ -15,46 +15,90 @@ import math
 import time
 import datetime
 import model
-#from tensorflow.python.training import saver
+import dag
+
+_HEIGHT = 32
+_WIDTH = 32
+_DEPTH = 3
+_NUM_CLASSES = 10
+_NUM_DATA_FILES = 5
+
+_WEIGHT_DECAY = 5e-4 #1e-4
+_MOMENTUM = 0.9
+
+_NUM_IMAGES = {
+    'train': 45000,
+    'valid': 5000,
+    'test': 10000,
+}
+
 
 parser = argparse.ArgumentParser()
 
 # Basic model parameters.
+parser.add_argument('--mode', type=str, default='train',
+                    choices=['train', 'test'],
+                    help='Train, or test.')
+
 parser.add_argument('--data_dir', type=str, default='/tmp/cifar10_data',
                     help='The path to the CIFAR-10 data directory.')
 
 parser.add_argument('--model_dir', type=str, default='/tmp/cifar10_model',
                     help='The directory where the model will be stored.')
 
-parser.add_argument('--num_blocks', type=int, default=1,
-                    help='The number of the blocks.')
-
-parser.add_argument('--num_cells', type=int, default=6,
-                    help='The number of convolution cells in a block.')
+parser.add_argument('--previous_steps', type=int, default=0,
+                    help='Previous steps when restored.')
 
 parser.add_argument('--num_nodes', type=int, default=7,
                     help='The number of nodes in a cell.')
 
-parser.add_argument('--filters', type=int, default=128,
+parser.add_argument('--N', type=int, default=6,
+                    help='The number of stacked convolution cell.')
+
+parser.add_argument('--filters', type=int, default=36,
                     help='The numer of filters.')
 
-parser.add_argument('--depth_multiplier', type=int, default=1,
-                    help='The number of depth_multiplier in depthwise separable convolution')
+parser.add_argument('--drop_path_keep_prob', type=float, default=0.6,
+                    help='Dropout rate.')
+
+parser.add_argument('--dense_dropout_keep_prob', type=float, default=1.0,
+                    help='Dropout rate.')
+
+parser.add_argument('--stem_multiplier', type=float, default=3.0,
+                    help='Stem convolution multiplier. Default is 3.0 for CIFAR-10. 1.0 is for ImageNet.')
 
 parser.add_argument('--train_epochs', type=int, default=310,
                     help='The number of epochs to train.')
 
-parser.add_argument('--save_epochs', type=int, default=10,
-                    help='The number of epochs to run in between saving checkpoints.')
+parser.add_argument('--epochs_per_eval', type=int, default=10,
+                    help='The number of epochs to run in between evaluations.')
 
 parser.add_argument('--batch_size', type=int, default=128,
                     help='The number of images per batch.')
 
-parser.add_argument('--reload', type=bool, default=False,
-                    help='Reload a model.')
+parser.add_argument('--dag', type=str, default=None,
+                    help='Default dag to run.')
 
-parser.add_argument('--random_dag', type=bool, default=False,
-                    help='Random sample a dag to run.')
+parser.add_argument('--hparams', type=str, default=None,
+                    help='hparams file. All the params will be overrided by this file.')
+
+parser.add_argument('--split_train_valid', action='store_true', default=False,
+                    help='Split training data to train set and valid set.')
+
+parser.add_argument('--activation', type=str, default=None,
+          help='Activation function for convolutions.')
+
+parser.add_argument('--use_nesterov', action='store_true', default=False,
+                    help='Use nesterov in Momentum Optimizer.')
+
+parser.add_argument('--use_aux_head', action='store_true', default=False,
+                    help='Use auxillary head.')
+
+parser.add_argument('--aux_head_weight', type=float, default=0.4,
+                    help='Weight of auxillary head loss.')
+
+parser.add_argument('--weight_decay', type=float, default=_WEIGHT_DECAY,
+                    help='Weight decay.')
 
 parser.add_argument(
     '--data_format', type=str, default=None,
@@ -71,10 +115,10 @@ parser.add_argument('--lr_schedule', type=str, default='cosine',
 parser.add_argument('--lr', type=float, default='0.1',
                     help='Learning rate when learning rate schedule is constant.')
 
-parser.add_argument('--lr_max', type=float, default=0.05,
+parser.add_argument('--lr_max', type=float, default=0.025,  #0.05 in ENAS
                     help='Max learning rate.')
 
-parser.add_argument('--lr_min', type=float, default=0.001,
+parser.add_argument('--lr_min', type=float, default=0.0, #0.001 in ENAS
                     help='Min learning rate.')
 
 parser.add_argument('--T_0', type=int, default=10,
@@ -83,22 +127,6 @@ parser.add_argument('--T_0', type=int, default=10,
 parser.add_argument('--T_mul', type=int, default=2,
                     help='Multiplicator for the cycle.')
 
-_HEIGHT = 32
-_WIDTH = 32
-_DEPTH = 3
-_NUM_CLASSES = 10
-_NUM_DATA_FILES = 5
-
-# We use a weight decay of 0.0002, which performs better than the 0.0001 that
-# was originally suggested.
-_WEIGHT_DECAY = 1e-4 #2e-4
-_MOMENTUM = 0.9
-
-_NUM_IMAGES = {
-    'train': 50000,
-    'validation': 10000,
-}
-
 
 def record_dataset(filenames):
   """Returns an input pipeline Dataset from `filenames`."""
@@ -106,21 +134,32 @@ def record_dataset(filenames):
   return tf.data.FixedLengthRecordDataset(filenames, record_bytes)
 
 
-def get_filenames(is_training, data_dir):
+def get_filenames(split, mode, data_dir):
   """Returns a list of filenames."""
-  data_dir = os.path.join(data_dir, 'cifar-10-batches-bin')
+  if not split:
+    data_dir = os.path.join(data_dir, 'cifar-10-batches-bin')
 
   assert os.path.exists(data_dir), (
       'Run cifar10_download_and_extract.py first to download and extract the '
       'CIFAR-10 data.')
 
-  if is_training:
-    return [
+  if split:
+    if mode == 'train':
+      return [
+        os.path.join(data_dir, 'train_batch_%d.bin' % i)
+        for i in range(1, _NUM_DATA_FILES + 1)]
+    elif mode == 'valid':
+      return [os.path.join(data_dir, 'valid_batch.bin')]
+    else:
+      return [os.path.join(data_dir, 'test_batch.bin')]
+  else:
+    if mode == 'train':
+      return [
         os.path.join(data_dir, 'data_batch_%d.bin' % i)
         for i in range(1, _NUM_DATA_FILES + 1)
     ]
-  else:
-    return [os.path.join(data_dir, 'test_batch.bin')]
+    else:
+      return [os.path.join(data_dir, 'test_batch.bin')]
 
 
 def parse_record(raw_record):
@@ -169,7 +208,7 @@ def preprocess_image(image, is_training):
   return image
 
 
-def input_fn(is_training, data_dir, batch_size, num_epochs=1):
+def input_fn(split, mode, data_dir, batch_size, num_epochs=1):
   """Input_fn using the tf.data input pipeline for CIFAR-10 dataset.
 
   Args:
@@ -181,13 +220,18 @@ def input_fn(is_training, data_dir, batch_size, num_epochs=1):
   Returns:
     A tuple of images and labels.
   """
-  dataset = record_dataset(get_filenames(is_training, data_dir))
+  dataset = record_dataset(get_filenames(split, mode, data_dir))
+  is_training = mode in ['train', 'valid']
+
 
   if is_training:
     # When choosing shuffle buffer sizes, larger sizes result in better
     # randomness, while smaller sizes have better performance. Because CIFAR-10
     # is a relatively small dataset, we choose to shuffle the full epoch.
-    dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train'])
+    if split:
+      dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train'])
+    else:
+      dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train']+_NUM_IMAGES['valid'])
 
   dataset = dataset.map(parse_record)
   dataset = dataset.map(
@@ -207,9 +251,9 @@ def input_fn(is_training, data_dir, batch_size, num_epochs=1):
 
   return images, labels
 
-
 def _log_variable_sizes(var_list, tag):
   """Log the sizes and shapes of variables, and the total size.
+
     Args:
       var_list: a list of varaibles
       tag: a string
@@ -225,13 +269,13 @@ def _log_variable_sizes(var_list, tag):
     total_size += v_size
   tf.logging.info("%s Total size: %d", tag, total_size)
 
-
-def cifar10_model_fn(inputs:'inputs image', labels:'lables for inputs', mode, params:'dict of params', reuse=False):
+def cifar10_model_fn(features, labels, mode, params):
   """Model function for CIFAR-10."""
-  tf.summary.image('images', inputs, max_outputs=6)
+  tf.summary.image('images', features, max_outputs=6)
 
-  inputs = tf.reshape(inputs, [-1, _HEIGHT, _WIDTH, _DEPTH])
-  logits = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN, reuse=reuse)
+  inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
+  res = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
+  logits = res['logits']
 
   predictions = {
       'classes': tf.argmax(logits, axis=1),
@@ -250,23 +294,47 @@ def cifar10_model_fn(inputs:'inputs image', labels:'lables for inputs', mode, pa
   tf.summary.scalar('cross_entropy', cross_entropy)
 
   # Add weight decay to the loss.
-  loss = cross_entropy + _WEIGHT_DECAY * tf.add_n(
+  loss = cross_entropy + params['weight_decay'] * tf.add_n(
       [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
 
+  if 'aux_logits' in res:
+    aux_logits = res['aux_logits']
+    aux_loss = tf.losses.softmax_cross_entropy(
+      logits=aux_logits, onehot_labels=labels, weights=params['aux_head_weight'])
+    loss += aux_loss
+
   if mode == tf.estimator.ModeKeys.TRAIN:
-    # Scale the learning rate linearly with the batch size. When the batch size
-    # is 128, the learning rate should be 0.1.
-    learning_rate = params['learning_rate']
-    """
-    initial_learning_rate = 0.1 * params['batch_size'] / 128
-    batches_per_epoch = _NUM_IMAGES['train'] / params['batch_size']
     global_step = tf.train.get_or_create_global_step()
-    # Multiply the learning rate by 0.1 at 100, 150, and 200 epochs.
-    boundaries = [int(batches_per_epoch * epoch) for epoch in [100, 150, 200]]
-    values = [initial_learning_rate * decay for decay in [1, 0.1, 0.01, 0.001]]
-    learning_rate = tf.train.piecewise_constant(
-      tf.cast(global_step, tf.int32), boundaries, values)
-    """
+
+    num_images = _NUM_IMAGES['train'] if params['split_train_valid'] else _NUM_IMAGES['train'] + _NUM_IMAGES['valid']
+
+    if params['lr_schedule'] == 'cosine':
+      lr_max = params['lr_max']
+      lr_min = params['lr_min']
+      T_0 = tf.constant(params['T_0'], dtype=tf.float32)
+      T_mul = tf.constant(params['T_mul'], dtype=tf.float32)
+      batches_per_epoch = math.ceil(num_images / params['batch_size'])
+      
+      cur_epoch = tf.floor(tf.cast(global_step, dtype=tf.float32) / batches_per_epoch)
+      if params['T_mul'] == 1:
+        cur_i = tf.floor(cur_epoch / T_0)
+        T_beg = T_0 * cur_i
+        T_i = T_0
+      else:
+        cur_i = tf.ceil(tf.log((T_mul - 1.0) * (cur_epoch / T_0 + 1.0)) / tf.log(2.0))
+        T_beg = T_0 * (tf.pow(T_mul, cur_i) - 1.0) / (T_mul - 1.0)
+        T_i = T_0 * tf.pow(T_mul, cur_i)
+      
+      T_cur = cur_epoch - T_beg
+      learning_rate = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + tf.cos(T_cur / T_i * np.pi))
+    elif params['lr_schedule'] == 'decay':
+      batches_per_epoch = num_images / params['batch_size']
+      boundaries = [int(batches_per_epoch * epoch) for epoch in [100, 200, 300]]
+      values = [params['lr'] * decay for decay in [1, 0.1, 0.01, 0.001]]
+      learning_rate = tf.train.piecewise_constant(
+        tf.cast(global_step, tf.int32), boundaries, values)
+    else:
+      learning_rate = params['lr']
 
     # Create a tensor named learning_rate for logging purposes
     tf.identity(learning_rate, name='learning_rate')
@@ -274,210 +342,142 @@ def cifar10_model_fn(inputs:'inputs image', labels:'lables for inputs', mode, pa
 
     optimizer = tf.train.MomentumOptimizer(
         learning_rate=learning_rate,
-        momentum=_MOMENTUM)
+        momentum=_MOMENTUM,
+        use_nesterov=params['use_nesterov'])
 
     # Batch norm requires update ops to be added as a dependency to the train_op
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
-      train_op = optimizer.minimize(loss)
+      #train_op = optimizer.minimize(loss, global_step)
+      gradients, variables = zip(*optimizer.compute_gradients(loss))
+      gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
+      train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
   else:
     train_op = None
 
   accuracy = tf.metrics.accuracy(
-      tf.argmax(labels, axis=1), predictions['classes'])[1]
+      tf.argmax(labels, axis=1), predictions['classes'])
+  metrics = {'accuracy': accuracy}
 
   # Create a tensor named train_accuracy for logging purposes
-  tf.identity(accuracy, name='train_accuracy')
-  tf.summary.scalar('train_accuracy', accuracy)
+  tf.identity(accuracy[1], name='train_accuracy')
+  tf.summary.scalar('train_accuracy', accuracy[1])
 
-  return {
-      'predictions': predictions,
-      'loss': loss,
-      'train_op': train_op,
-      'accuracy': accuracy,
-      'cross_entropy': cross_entropy}
-
-
-def get_dag(num_nodes, cell='conv_dag'):
-  dag = OrderedDict()
-  operations = list(model._OPERATIONS.keys())
-  num_operations = len(operations)
-  for i in xrange(1, num_nodes+1):
-    name = 'node_%d' % i
-    if i == 1 or i == 2:
-      node = model.Node(name, None, None, None, None)
-    else:
-      p_node_1 = 'node_%d' % random.randint(1, i-1) 
-      p_node_2 = 'node_%d' % random.randint(1, i-1)
-      if cell == 'conv_dag':
-        op1 = operations[random.randint(0, num_operations-1)]  
-        op2 = operations[random.randint(0, num_operations-1)]  
-      else:
-        op1 = operations[random.randint(1, num_operations-1)]  
-        op2 = operations[random.randint(1, num_operations-1)]  
-      node = model.Node(name, p_node_1, p_node_2, op1, op2)
-    dag[name] = node
-  return dag
+  return tf.estimator.EstimatorSpec(
+      mode=mode,
+      predictions=predictions,
+      loss=loss,
+      train_op=train_op,
+      eval_metric_ops=metrics)
 
 
-def build_dag():
-  if FLAGS.random_dag:
-    conv_dag = get_dag(FLAGS.num_nodes, 'conv_dag')
-    reduc_dag = get_dag(FLAGS.num_nodes, 'reduc_dag') 
-  else:
-    conv_dag = OrderedDict()
-    conv_dag['node_1'] = model.Node('node_1', None, None, None, None)
-    conv_dag['node_2'] = model.Node('node_2', None, None, None, None)
-    conv_dag['node_3'] = model.Node('node_3', 'node_2', 'node_2', 'sep_conv 3x3', 'identity')
-    conv_dag['node_4'] = model.Node('node_4', 'node_2', 'node_1', 'sep_conv 5x5', 'identity')
-    conv_dag['node_5'] = model.Node('node_5', 'node_1', 'node_2', 'avg_pool 3x3', 'sep_conv 3x3')
-    conv_dag['node_6'] = model.Node('node_6', 'node_1', 'node_2', 'sep_conv 3x3', 'avg_pool 3x3')
-    conv_dag['node_7'] = model.Node('node_7', 'node_2', 'node_1', 'sep_conv 5x5', 'avg_pool 3x3')
+def build_dag(dag_name_or_path):
+  try:
+    conv_dag, reduc_dag = eval('dag.{}()'.format(dag_name_or_path))
+  except:
+    conv_dag, reduc_dag = None, None
 
-    reduc_dag = OrderedDict()
-    reduc_dag['node_1'] = model.Node('node_1', None, None, None, None)
-    reduc_dag['node_2'] = model.Node('node_2', None, None, None, None)
-    reduc_dag['node_3'] = model.Node('node_3', 'node_1', 'node_2', 'sep_conv 5x5', 'avg_pool 3x3')
-    reduc_dag['node_4'] = model.Node('node_4', 'node_2', 'node_2', 'sep_conv 3x3', 'avg_pool 3x3')
-    reduc_dag['node_5'] = model.Node('node_5', 'node_2', 'node_2', 'avg_pool 3x3', 'sep_conv 3x3')
-    reduc_dag['node_6'] = model.Node('node_6', 'node_5', 'node_2', 'sep_conv 5x5', 'avg_pool 3x3')
-    reduc_dag['node_7'] = model.Node('node_7', 'node_6', 'node_1', 'sep_conv 3x3', 'sep_conv 5x5')
-    
-  with open(os.path.join(FLAGS.model_dir, 'model_dag.json'), 'w') as f:
-    dag = OrderedDict()
-    dag['conv_dag'] = conv_dag
-    dag['reduc_dag'] = reduc_dag
-    json.dump(dag, f)
   return conv_dag, reduc_dag
 
 
-def get_learning_rate(cur_epoch, step, batches_per_epoch):
-  if FLAGS.lr_schedule == 'constant':
-    return FLAGS.lr
-  elif FLAGS.lr_schedule == 'decay':
-    if cur_epoch <= 100:
-      decay = 1
-    elif cur_epoch <=200:
-      decay = 0.1
-    elif cur_epoch <= 300:
-      decay = 0.01
-    else:
-      decay = 0.001
-    return FLAGS.lr * decay
-  else:
-    T_0 = FLAGS.T_0
-    T_mul = FLAGS.T_mul
-    lr_min = FLAGS.lr_min
-    lr_max = FLAGS.lr_max
-    T_beg = 1
-    T_i = T_mul
-    T_end = T_beg + T_i
-    while cur_epoch >= T_end:
-      T_beg = T_end
-      T_i *= T_mul
-      T_end = T_beg + T_i
-    T_cur = cur_epoch - T_beg + step / batches_per_epoch
-    learning_rate = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + np.cos(T_cur / T_i * np.pi))
-    return learning_rate
-
-
-def evaluation(sess, eval_res, global_step, eval_steps, summary_writer):
-  ct = time.localtime()
-  tf.logging.info(f"Strating evaluation on test data at {ct.tm_year}-{ct.tm_mon}-{ct.tm_mday}-{ct.tm_hour}:{ct.tm_min}:{ct.tm_sec}")
+def get_params():
+  conv_dag, reduc_dag = build_dag(FLAGS.dag)
   
-  cross_entropy_op, loss_op, accuracy_op = eval_res['cross_entropy'], eval_res['loss'], eval_res['accuracy']
+  if FLAGS.split_train_valid:
+    total_steps = int(FLAGS.train_epochs * _NUM_IMAGES['train'] / float(FLAGS.batch_size))
+  else:
+    total_steps = int(FLAGS.train_epochs * (_NUM_IMAGES['train'] + _NUM_IMAGES['valid']) / float(FLAGS.batch_size))
+  
+  params = vars(FLAGS)
+  params['num_classes'] = _NUM_CLASSES
+  params['conv_dag'] = conv_dag
+  params['reduc_dag'] = reduc_dag
+  params['total_steps'] = total_steps
 
-  ce_list, loss_list, acc_list = [], [], []
-  for _ in xrange(eval_steps):
-    cross_entropy, loss, accuracy = sess.run([cross_entropy_op, loss_op, accuracy_op])
-    ce_list.append(accuracy)
-    loss_list.append(loss)
-    acc_list.append(accuracy)
-  test_cross_entropy, test_loss, test_accuracy = np.mean(ce_list), np.mean(loss_list), np.mean(acc_list)
-  if summary_writer is not None:
-    eval_sum = tf.Summary()
-    eval_sum.value.add(tag='evaluation_accuracy', simple_value=test_accuracy.astype(np.float))
-    eval_sum.value.add(tag='evaluation_loss', simple_value=test_loss.astype(np.float))
-    eval_sum.value.add(tag='evaluation_cross_entropy', simple_value=test_cross_entropy.astype(np.float))
-    summary_writer.add_summary(eval_sum, global_step)
-    summary_writer.flush()
-  ct = time.localtime()
-  tf.logging.info(f"Finished evaluation on test data at {ct.tm_year}-{ct.tm_mon}-{ct.tm_mday}-{ct.tm_hour}:{ct.tm_min}:{ct.tm_sec}")
-  tf.logging.info("accuracy = %.6f, global_step = %d, loss = %.6f" % (test_accuracy, global_step, test_loss))    
+  if FLAGS.hparams is not None:
+    with open(os.path.join(FLAGS.hparams), 'r') as f:
+      hparams = json.load(f)
+      params.update(hparams)
+ 
+  if params['conv_dag'] is None or params['reduc_dag'] is None:
+    raise ValueError('You muse specify a registered model name or provide a model in the hparams.')
+  
+  return params 
 
-def train(sess, train_res, summary_op, summary_writer, learning_rate, epoch_i, global_step, batches_per_epoch, train_steps):
-  train_op, cross_entropy_op, loss_op, accuracy_op = train_res['train_op'], train_res['cross_entropy'], train_res['loss'], train_res['accuracy']
-  start_time = time.time()
-  for _ in xrange(train_steps):
-    global_step += 1
-    lr = get_learning_rate(epoch_i, global_step, batches_per_epoch)
-    _, summary_str, cross_entropy, loss, accuracy = sess.run(
-      [train_op, summary_op, cross_entropy_op, loss_op, accuracy_op],
-      {learning_rate: lr})
-    if global_step % 100 == 1:
-      summary_writer.add_summary(summary_str, global_step)
-      duration = time.time() - start_time
-      tf.logging.info("loss = %.6f, step = %d (%.6f sec)" % (loss, global_step, duration))
-      tf.logging.info("learning_rate = %.6f, cross_entropy=%.6f, training_accuracy = %.6f" % (lr, cross_entropy, accuracy))
-      start_time = time.time()
-  return global_step
 
 def main(unused_argv):
   # Using the Winograd non-fused algorithms provides a small performance boost.
   os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 
-  conv_dag, reduc_dag = build_dag()
-  
-  params={
-    'num_blocks': FLAGS.num_blocks,
-    'num_cells': FLAGS.num_cells,
-    'num_nodes': FLAGS.num_nodes,
-    'num_classes': _NUM_CLASSES,
-    'filters': FLAGS.filters,
-    'depth_multiplier': FLAGS.depth_multiplier,
-    'conv_dag': conv_dag,
-    'reduc_dag': reduc_dag,
-    'data_format': FLAGS.data_format,
-    'batch_size': FLAGS.batch_size,
-  }
-  
-  batches_per_train_epoch = math.ceil(_NUM_IMAGES['train'] / FLAGS.batch_size)
-  batches_per_eval_epoch = math.ceil(_NUM_IMAGES['validation'] / FLAGS.batch_size)
-  
-  train_images, train_labels = input_fn(True, FLAGS.data_dir, FLAGS.batch_size, None)
-  eval_images, eval_labels = input_fn(False, FLAGS.data_dir, FLAGS.batch_size, None)
-  
-  learning_rate = tf.placeholder(tf.float32, [], name='learning_rate')
-  params['learning_rate'] = learning_rate
+  if FLAGS.mode == 'train':
+    params = get_params()
 
-  train_res = cifar10_model_fn(train_images, train_labels, tf.estimator.ModeKeys.TRAIN, params)
-  eval_res = cifar10_model_fn(eval_images, eval_labels, tf.estimator.ModeKeys.EVAL, params, True)
+    cifar10_model_fn(tf.zeors([32 ,32 ,32 ,3]),
+      tf.one_hot(tf.ones([32], dtype=tf.uint8), _NUM_CLASSES),
+      tf.estimator.ModeKeys.TRAIN, params)
 
-  _log_variable_sizes(tf.trainable_variables(), "Trainable Variables")
+    _log_variable_sizes(tf.trainable_variables(), 'Trainable Variables')
+
+    with open(os.path.join(params['model_dir'], 'hparams.json'), 'w') as f:
+      json.dump(params, f)
+    
+    if os.path.exists(os.path.join(params['model_dir'], 'checkpoint')):
+      with open(os.path.join(params['model_dir'], 'checkpoint'), 'r') as f:
+        line = f.readline()
+        line = line.strip().split(' ')[-1]
+        line = line.split('-')[-1][:-1]
+        previous_step = int(line)
+        num_images = _NUM_IMAGES['train'] if params['split_train_valid'] else _NUM_IMAGES['train'] + _NUM_IMAGES['valid']
+        batches_per_epoch = num_images / params['batch_size']
+        start_epoch_loop = int(previous_step / batches_per_epoch // FLAGS.epochs_per_eval)
+    else:
+      start_epoch_loop = 0
+
+    # Set up a RunConfig to only save checkpoints once per training cycle.
+    run_config = tf.estimator.RunConfig().replace(save_checkpoints_secs=1e9)
+    cifar_classifier = tf.estimator.Estimator(
+      model_fn=cifar10_model_fn, model_dir=params['model_dir'], config=run_config,
+      params=params)
+    for _ in range(start_epoch_loop, params['train_epochs'] // params['epochs_per_eval']):
+      tensors_to_log = {
+          'learning_rate': 'learning_rate',
+          'cross_entropy': 'cross_entropy',
+          'train_accuracy': 'train_accuracy'
+      }
+
+      logging_hook = tf.train.LoggingTensorHook(
+          tensors=tensors_to_log, every_n_iter=100)
+
+      cifar_classifier.train(
+          input_fn=lambda: input_fn(
+              params['split_train_valid'], 'train', params['data_dir'], params['batch_size'], params['epochs_per_eval']),
+          hooks=[logging_hook])
+
+      if params['split_train_valid']:
+        # Valid the model and print results
+        eval_results = cifar_classifier.evaluate(
+            input_fn=lambda: input_fn(params['split_train_valid'], 'valid', params['data_dir'], params['batch_size']))
+        tf.logging.info('Evaluation on valid data set')
+        print(eval_results)
+      
+      # Evaluate the model and print results
+      eval_results = cifar_classifier.evaluate(
+          input_fn=lambda: input_fn(params['split_train_valid'], 'test', params['data_dir'], params['batch_size']))
+      tf.logging.info('Evaluation on test data set')
+      print(eval_results)
+  elif FLAGS.mode == 'test':
+    if not os.path.exists(os.path.join(FLAGS.model_dir, 'hparams.json')):
+      raise ValueError('No hparams.json found in {0}'.format(FLAGS.model_dir))
+    with open(os.path.join(FLAGS.model_dir, 'hparams.json'), 'r') as f:
+      params = json.load(f)
   
-  summary_op = tf.summary.merge_all()
+    cifar_classifier = tf.estimator.Estimator(
+      model_fn=cifar10_model_fn, model_dir=FLAGS.model_dir, params=params)
+    eval_results = cifar_classifier.evaluate(
+          input_fn=lambda: input_fn(False, 'test', FLAGS.data_dir, params['batch_size']))
+    tf.logging.info('Evaluation on test data set')
+    print(eval_results)
 
-  init_global = tf.global_variables_initializer()
-  init_local = tf.local_variables_initializer()
-  sess = tf.Session()
-  sess.run([init_global, init_local])
-
-  summary_writer = tf.summary.FileWriter(FLAGS.model_dir, sess.graph)
-
-  saver = tf.train.Saver(max_to_keep=10)
-
-  """
-  for _ in xrange(10):
-    print(sess.run([train_images, train_labels]))
-  exit(0)"""
-  
-  global_step = 0
-  for epoch_i in xrange(1, FLAGS.train_epochs+1):
-    global_step = train(sess, train_res, summary_op, summary_writer, learning_rate, epoch_i, global_step, batches_per_train_epoch, train_steps=batches_per_train_epoch)
-    evaluation(sess, eval_res, global_step, batches_per_eval_epoch, summary_writer)
-    tf.logging.info(f"Saving model checkpoint model.ckpt-{global_step}")
-    checkpoint_path = os.path.join(FLAGS.model_dir, 'model.ckpt')
-    saver.save(sess, checkpoint_path, global_step=global_step)
 
 if __name__ == '__main__':
   tf.logging.set_verbosity(tf.logging.INFO)

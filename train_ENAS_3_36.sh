@@ -6,7 +6,7 @@ MODEL_DIR=model/model_$MODEL
 LOG_DIR=log
 mkdir -p $MODEL_DIR
 mkdir -p $LOG_DIR
-nohup python main_es.py \
+nohup python main.py \
   --data_dir=data \
   --model_dir=$MODEL_DIR \
   --train_epochs=600 \
