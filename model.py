@@ -550,7 +550,7 @@ def _build_aux_head(aux_net, num_classes, params, data_format, is_training):
         aux_logits = tf.reduce_mean(aux_logits, axis=[2,3])
       else:
         aux_logits = tf.reduce_mean(aux_logits, axis=[1,2])
-      aux_logits = tf.layers.dense(inputs=aux_logits, units=num_classes, use_bias=_USE_BIAS)
+      aux_logits = tf.layers.dense(inputs=aux_logits, units=num_classes)#, use_bias=_USE_BIAS)
   return aux_logits
 
 
@@ -658,7 +658,7 @@ def build_model(inputs, params, is_training, reuse=False):
     inputs = tf.layers.dropout(inputs, 1 - dense_dropout_keep_prob, training=is_training)
 
     with tf.variable_scope('fully_connected_layer'):
-      inputs = tf.layers.dense(inputs=inputs, units=num_classes, use_bias=_USE_BIAS)
+      inputs = tf.layers.dense(inputs=inputs, units=num_classes)#, use_bias=_USE_BIAS)
 
   res = {'logits': inputs}
   if use_aux_head and is_training:

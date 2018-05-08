@@ -3,10 +3,16 @@ from __future__ import division
 from __future__ import print_function
 
 _OPERATIONS=[
-  'identity',
   'sep_conv 3x3',
   'sep_conv 5x5',
   'sep_conv 7x7',
+  'conv 1x1',
+  'conv 3x3',
+  'conv 1x3+3x1',
+  'conv 1x7+7x1',
+  'dil_sep_conv 3x3',
+  'dil_sep_conv 5x5',
+  'dil_sep_conv 7x7',
   'avg_pool 2x2',
   'avg_pool 3x3',
   'avg_pool 5x5',
@@ -15,14 +21,5 @@ _OPERATIONS=[
   'max_pool 5x5',
   'max_pool 7x7',
   'min_pool 2x2',
-  'conv 1x1',
-  'conv 3x3',
-  'conv 1x3+3x1',
-  'conv 1x7+7x1',
-  'dil_sep_conv 3x3',
-  'dil_sep_conv 5x5',
-  'dil_sep_conv 7x7',
-#  'dil_conv 3x3 2',
-#  'dil_conv 3x3 4',
-#  'dil_conv 3x3 6',
+  'identity',
 ]

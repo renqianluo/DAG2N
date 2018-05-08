@@ -73,6 +73,9 @@ parser.add_argument('--train_epochs', type=int, default=310,
 parser.add_argument('--epochs_per_eval', type=int, default=10,
                     help='The number of epochs to run in between evaluations.')
 
+parser.add_argument('--eval_after', type=int, default=0,
+                    help='The number of epochs to run before evaluations.')
+
 parser.add_argument('--batch_size', type=int, default=128,
                     help='The number of images per batch.')
 
@@ -452,19 +455,19 @@ def main(unused_argv):
           input_fn=lambda: input_fn(
               params['split_train_valid'], 'train', params['data_dir'], params['batch_size'], params['epochs_per_eval']),
           hooks=[logging_hook])
-
-      if params['split_train_valid']:
-        # Valid the model and print results
-        eval_results = cifar_classifier.evaluate(
-            input_fn=lambda: input_fn(params['split_train_valid'], 'valid', params['data_dir'], params['batch_size']))
-        tf.logging.info('Evaluation on valid data set')
-        print(eval_results)
+      if _ >= params['eval_after']:
+        if params['split_train_valid']:
+          # Valid the model and print results
+          eval_results = cifar_classifier.evaluate(
+              input_fn=lambda: input_fn(params['split_train_valid'], 'valid', params['data_dir'], params['batch_size']))
+          tf.logging.info('Evaluation on valid data set')
+          print(eval_results)
       
-      # Evaluate the model and print results
-      eval_results = cifar_classifier.evaluate(
-          input_fn=lambda: input_fn(params['split_train_valid'], 'test', params['data_dir'], params['batch_size']))
-      tf.logging.info('Evaluation on test data set')
-      print(eval_results)
+        # Evaluate the model and print results
+        eval_results = cifar_classifier.evaluate(
+            input_fn=lambda: input_fn(params['split_train_valid'], 'test', params['data_dir'], params['batch_size']))
+        tf.logging.info('Evaluation on test data set')
+        print(eval_results)
   elif FLAGS.mode == 'test':
     if not os.path.exists(os.path.join(FLAGS.model_dir, 'hparams.json')):
       raise ValueError('No hparams.json found in {0}'.format(FLAGS.model_dir))
