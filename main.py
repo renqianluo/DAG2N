@@ -432,30 +432,81 @@ def main(unused_argv):
         previous_step = int(line)
         num_images = _NUM_IMAGES['train'] if params['split_train_valid'] else _NUM_IMAGES['train'] + _NUM_IMAGES['valid']
         batches_per_epoch = num_images / params['batch_size']
-        start_epoch_loop = int(previous_step / batches_per_epoch // FLAGS.epochs_per_eval)
+        start_epoch = previous_step // batches_per_epoch
     else:
-      start_epoch_loop = 0
+      start_epoch = 0
 
     # Set up a RunConfig to only save checkpoints once per training cycle.
     run_config = tf.estimator.RunConfig().replace(save_checkpoints_secs=1e9)
     cifar_classifier = tf.estimator.Estimator(
       model_fn=cifar10_model_fn, model_dir=params['model_dir'], config=run_config,
       params=params)
-    for _ in range(start_epoch_loop, params['train_epochs'] // params['epochs_per_eval']):
-      tensors_to_log = {
-          'learning_rate': 'learning_rate',
-          'cross_entropy': 'cross_entropy',
-          'train_accuracy': 'train_accuracy'
-      }
+    if start_epoch < params['eval_after']: 
+      start_epoch_loop = int(start_epoch // 10)#FLAGS.epochs_per_eval)
+      for _ in range(start_epoch_loop, params['eval_after'] // 10):
+        tensors_to_log = {
+            'learning_rate': 'learning_rate',
+            'cross_entropy': 'cross_entropy',
+            'train_accuracy': 'train_accuracy'
+        }
 
-      logging_hook = tf.train.LoggingTensorHook(
-          tensors=tensors_to_log, every_n_iter=100)
+        logging_hook = tf.train.LoggingTensorHook(
+            tensors=tensors_to_log, every_n_iter=100)
 
-      cifar_classifier.train(
-          input_fn=lambda: input_fn(
+        cifar_classifier.train(
+            input_fn=lambda: input_fn(
+              params['split_train_valid'], 'train', params['data_dir'], params['batch_size'],10),
+              hooks=[logging_hook])
+
+      rest_epochs = params['train_epochs'] - params['eval_after']
+      start_epoch_loop = 0
+      for _ in range(start_epoch_loop, rest_epochs // params['epochs_per_eval']):
+        tensors_to_log = {
+            'learning_rate': 'learning_rate',
+            'cross_entropy': 'cross_entropy',
+            'train_accuracy': 'train_accuracy'
+        }
+
+        logging_hook = tf.train.LoggingTensorHook(
+            tensors=tensors_to_log, every_n_iter=100)
+
+        cifar_classifier.train(
+            input_fn=lambda: input_fn(
               params['split_train_valid'], 'train', params['data_dir'], params['batch_size'], params['epochs_per_eval']),
-          hooks=[logging_hook])
-      if _ >= params['eval_after']:
+              hooks=[logging_hook])
+
+        if params['split_train_valid']:
+          # Valid the model and print results
+          eval_results = cifar_classifier.evaluate(
+              input_fn=lambda: input_fn(params['split_train_valid'], 'valid', params['data_dir'], params['batch_size']))
+          tf.logging.info('Evaluation on valid data set')
+          print(eval_results)
+      
+        # Evaluate the model and print results
+        eval_results = cifar_classifier.evaluate(
+            input_fn=lambda: input_fn(params['split_train_valid'], 'test', params['data_dir'], params['batch_size']))
+        tf.logging.info('Evaluation on test data set')
+        print(eval_results)
+
+    else:
+      eval_epochs = params['train_epochs'] - params['eval_after']
+      start_epoch_from_eval = start_epoch - params['eval_after']
+      start_epoch_loop = int(start_epoch_from_eval // params['epochs_per_eval'])
+      for _ in range(start_epoch_loop, eval_epochs // params['epochs_per_eval']):
+        tensors_to_log = {
+            'learning_rate': 'learning_rate',
+            'cross_entropy': 'cross_entropy',
+            'train_accuracy': 'train_accuracy'
+        }
+
+        logging_hook = tf.train.LoggingTensorHook(
+            tensors=tensors_to_log, every_n_iter=100)
+
+        cifar_classifier.train(
+            input_fn=lambda: input_fn(
+              params['split_train_valid'], 'train', params['data_dir'], params['batch_size'], params['epochs_per_eval']),
+              hooks=[logging_hook])
+
         if params['split_train_valid']:
           # Valid the model and print results
           eval_results = cifar_classifier.evaluate(
