@@ -368,18 +368,18 @@ def cifar10_model_fn(features, labels, mode, params):
         gradients, variables = zip(*optimizer.compute_gradients(loss))
         gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
         train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
-    accuracy = tf.metrics.accuracy(
-      tf.argmax(labels, axis=1), predictions['classes'])
-    metrics = {'accuracy': accuracy}
+      accuracy = tf.metrics.accuracy(
+        tf.argmax(labels, axis=1), predictions['classes'])
+      metrics = {'accuracy': accuracy}
 
-    # Create a tensor named train_accuracy for logging purposes
-    tf.identity(accuracy[1], name='train_accuracy')
-    tf.summary.scalar('train_accuracy', accuracy[1])
-    return tf.estimator.EstimatorSpec(
-      mode=mode,
-      loss=loss,
-      train_op=train_op,
-      eval_metric_ops=metrics)
+      # Create a tensor named train_accuracy for logging purposes
+      tf.identity(accuracy[1], name='train_accuracy')
+      tf.summary.scalar('train_accuracy', accuracy[1])
+      return tf.estimator.EstimatorSpec(
+        mode=mode,
+        loss=loss,
+        train_op=train_op,
+        eval_metric_ops=metrics)
 
 
   elif mode == tf.estimator.ModeKeys.EVAL:
