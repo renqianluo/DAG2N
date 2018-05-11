@@ -385,7 +385,8 @@ def cifar10_model_fn(features, labels, mode, params):
 
   elif mode == tf.estimator.ModeKeys.EVAL:
     inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
-    res = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
+    with tf.variable_scope(tf.get_variable_scope()):
+      res = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
     logits = res['logits']
     # Calculate loss, which includes softmax cross entropy and L2 regularization.
     cross_entropy = tf.losses.softmax_cross_entropy(
@@ -417,7 +418,8 @@ def cifar10_model_fn(features, labels, mode, params):
       eval_metric_ops=metrics)
   else:
     inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
-    res = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
+    with tf.variable_scope(tf.get_variable_scope()):
+      res = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
     logits = res['logits']
 
     predictions = {
