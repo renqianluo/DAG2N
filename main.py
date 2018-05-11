@@ -285,17 +285,18 @@ def cifar10_model_fn(features, labels, mode, params):
     
       inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
       num_per_gpu = params['batch_size'] // params['num_gpus']
-      for i in range(params['num_gpus']):
-        inputs_shard = inputs[i*num_per_gpu:(i+1)*num_per_gpu]
-        with tf.device('/gpu:%d'%i):
-          res = model.build_model(inputs_shard, params, mode == tf.estimator.ModeKeys.TRAIN)
-          logits = res['logits']
-          sharded_logits.append(logits)
-          if 'aux_logits' in res:
-            aux_logits = res['aux_logits']
-            sharded_aux_logits.append(aux_logits)
-          # Reuse variables for the next gpu.
-          tf.get_variable_scope().reuse_variables()
+      with tf.variable_scope(tf.get_variable_scope()):
+        for i in range(params['num_gpus']):
+          inputs_shard = inputs[i*num_per_gpu:(i+1)*num_per_gpu]
+          with tf.device('/gpu:%d'%i):
+            res = model.build_model(inputs_shard, params, mode == tf.estimator.ModeKeys.TRAIN)
+            logits = res['logits']
+            sharded_logits.append(logits)
+            if 'aux_logits' in res:
+              aux_logits = res['aux_logits']
+              sharded_aux_logits.append(aux_logits)
+            # Reuse variables for the next gpu.
+            tf.get_variable_scope().reuse_variables()
 
       logits = tf.concat(sharded_logits, axis=0)
       if sharded_aux_logits:
