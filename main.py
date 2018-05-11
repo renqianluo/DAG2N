@@ -280,6 +280,46 @@ def cifar10_model_fn(features, labels, mode, params):
   """Model function for CIFAR-10."""
   if mode == tf.estimator.ModeKeys.TRAIN:
     with tf.device('/cpu:0'):
+      sharded_logits = []
+      sharded_aux_logits = []
+    
+      inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
+      num_per_gpu = params['batch_size'] // params['num_gpus']
+      for i in range(params['num_gpus']):
+        inputs_shard = inputs[i*num_per_gpu:(i+1)*num_per_gpu]
+        with tf.device('/gpu:%d'%i):
+          res = model.build_model(inputs_shard, params, mode == tf.estimator.ModeKeys.TRAIN)
+          logits = res['logits']
+          sharded_logits.append(logits)
+          if 'aux_logits' in res:
+            aux_logits = res['aux_logits']
+            sharded_aux_logits.append(aux_logits)
+          # Reuse variables for the next gpu.
+          tf.get_variable_scope().reuse_variables()
+
+      logits = tf.concat(sharded_logits, axis=0)
+      if sharded_aux_logits:
+        aux_logits = tf.concat(sharded_aux_logits, axis=0)
+
+      predictions = {
+        'classes': tf.argmax(logits, axis=1),
+        'probabilities': tf.nn.softmax(logits, name='softmax_tensor')
+      }
+
+      cross_entropy = tf.losses.softmax_cross_entropy(
+        logits=logits, onehot_labels=labels) 
+      # Add weight decay to the loss.
+      loss = cross_entropy + params['weight_decay'] * tf.add_n(
+        [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
+
+      if sharded_aux_logits:
+        aux_loss = tf.losses.softmax_cross_entropy(
+            logits=aux_logits, onehot_labels=labels, weights=params['aux_head_weight'])
+        loss += aux_loss
+      # Create a tensor named cross_entropy for logging purposes.
+      tf.identity(cross_entropy, name='cross_entropy')
+      tf.summary.scalar('cross_entropy', cross_entropy)
+
       global_step = tf.train.get_or_create_global_step()
 
       num_images = _NUM_IMAGES['train'] if params['split_train_valid'] else _NUM_IMAGES['train'] + _NUM_IMAGES['valid']
@@ -320,46 +360,6 @@ def cifar10_model_fn(features, labels, mode, params):
           learning_rate=learning_rate,
           momentum=_MOMENTUM,
           use_nesterov=params['use_nesterov'])
-
-      sharded_logits = []
-      sharded_aux_logits = []
-    
-      inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
-      num_per_gpu = params['batch_size'] // params['num_gpus']
-      for i in range(params['num_gpus']):
-        inputs_shard = inputs[i*num_per_gpu:(i+1)*num_per_gpu]
-        with tf.device('/gpu:%d'%i):
-          res = model.build_model(inputs_shard, params, mode == tf.estimator.ModeKeys.TRAIN)
-          logits = res['logits']
-          sharded_logits.append(logits)
-          if 'aux_logits' in res:
-            aux_logits = res['aux_logits']
-            sharded_aux_logits.append(aux_logits)
-          # Reuse variables for the next gpu.
-          tf.get_variable_scope().reuse_variables()
-
-      logits = tf.concat(sharded_logits, axis=0)
-      if sharded_aux_logits:
-        aux_logits = tf.concat(sharded_aux_logits, axis=0)
-
-      predictions = {
-        'classes': tf.argmax(logits, axis=1),
-        'probabilities': tf.nn.softmax(logits, name='softmax_tensor')
-      }
-
-      cross_entropy = tf.losses.softmax_cross_entropy(
-        logits=logits, onehot_labels=labels) 
-      # Add weight decay to the loss.
-      loss = cross_entropy + params['weight_decay'] * tf.add_n(
-        [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
-
-      if sharded_aux_logits:
-        aux_loss = tf.losses.softmax_cross_entropy(
-            logits=aux_logits, onehot_labels=labels, weights=params['aux_head_weight'])
-        loss += aux_loss
-      # Create a tensor named cross_entropy for logging purposes.
-      tf.identity(cross_entropy, name='cross_entropy')
-      tf.summary.scalar('cross_entropy', cross_entropy)
 
       # Batch norm requires update ops to be added as a dependency to the train_op
       update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
