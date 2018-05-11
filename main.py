@@ -103,6 +103,9 @@ parser.add_argument('--aux_head_weight', type=float, default=0.4,
 parser.add_argument('--weight_decay', type=float, default=_WEIGHT_DECAY,
                     help='Weight decay.')
 
+parser.add_argument('--num_gpus', type=int, default=1,
+                    help='Number of GPU to use.')
+
 parser.add_argument(
     '--data_format', type=str, default=None,
     choices=['channels_first', 'channels_last'],
@@ -272,106 +275,154 @@ def _log_variable_sizes(var_list, tag):
     total_size += v_size
   tf.logging.info("%s Total size: %d", tag, total_size)
 
+
 def cifar10_model_fn(features, labels, mode, params):
   """Model function for CIFAR-10."""
-  tf.summary.image('images', features, max_outputs=6)
-
-  inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
-  res = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
-  logits = res['logits']
-
-  predictions = {
-      'classes': tf.argmax(logits, axis=1),
-      'probabilities': tf.nn.softmax(logits, name='softmax_tensor')
-  }
-
-  if mode == tf.estimator.ModeKeys.PREDICT:
-    return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
-
-  # Calculate loss, which includes softmax cross entropy and L2 regularization.
-  cross_entropy = tf.losses.softmax_cross_entropy(
-      logits=logits, onehot_labels=labels)
-
-  # Create a tensor named cross_entropy for logging purposes.
-  tf.identity(cross_entropy, name='cross_entropy')
-  tf.summary.scalar('cross_entropy', cross_entropy)
-
-  # Add weight decay to the loss.
-  loss = cross_entropy + params['weight_decay'] * tf.add_n(
-      [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
-
-  if 'aux_logits' in res:
-    aux_logits = res['aux_logits']
-    aux_loss = tf.losses.softmax_cross_entropy(
-      logits=aux_logits, onehot_labels=labels, weights=params['aux_head_weight'])
-    loss += aux_loss
-
   if mode == tf.estimator.ModeKeys.TRAIN:
-    global_step = tf.train.get_or_create_global_step()
+    with tf.device('/cpu:0'):
+      global_step = tf.train.get_or_create_global_step()
 
-    num_images = _NUM_IMAGES['train'] if params['split_train_valid'] else _NUM_IMAGES['train'] + _NUM_IMAGES['valid']
+      num_images = _NUM_IMAGES['train'] if params['split_train_valid'] else _NUM_IMAGES['train'] + _NUM_IMAGES['valid']
 
-    if params['lr_schedule'] == 'cosine':
-      lr_max = params['lr_max']
-      lr_min = params['lr_min']
-      T_0 = tf.constant(params['T_0'], dtype=tf.float32)
-      T_mul = tf.constant(params['T_mul'], dtype=tf.float32)
-      batches_per_epoch = math.ceil(num_images / params['batch_size'])
-      
-      cur_epoch = tf.floor(tf.cast(global_step, dtype=tf.float32) / batches_per_epoch)
-      if params['T_mul'] == 1:
-        cur_i = tf.floor(cur_epoch / T_0)
-        T_beg = T_0 * cur_i
-        T_i = T_0
+      if params['lr_schedule'] == 'cosine':
+        lr_max = params['lr_max']
+        lr_min = params['lr_min']
+        T_0 = tf.constant(params['T_0'], dtype=tf.float32)
+        T_mul = tf.constant(params['T_mul'], dtype=tf.float32)
+        batches_per_epoch = math.ceil(num_images / params['batch_size'])
+        
+        cur_epoch = tf.floor(tf.cast(global_step, dtype=tf.float32) / batches_per_epoch)
+        if params['T_mul'] == 1:
+          cur_i = tf.floor(cur_epoch / T_0)
+          T_beg = T_0 * cur_i
+          T_i = T_0
+        else:
+          cur_i = tf.ceil(tf.log((T_mul - 1.0) * (cur_epoch / T_0 + 1.0)) / tf.log(2.0))
+          T_beg = T_0 * (tf.pow(T_mul, cur_i) - 1.0) / (T_mul - 1.0)
+          T_i = T_0 * tf.pow(T_mul, cur_i)
+        
+        T_cur = cur_epoch - T_beg
+        learning_rate = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + tf.cos(T_cur / T_i * np.pi))
+      elif params['lr_schedule'] == 'decay':
+        batches_per_epoch = num_images / params['batch_size']
+        boundaries = [int(batches_per_epoch * epoch) for epoch in [100, 200, 300]]
+        values = [params['lr'] * decay for decay in [1, 0.1, 0.01, 0.001]]
+        learning_rate = tf.train.piecewise_constant(
+          tf.cast(global_step, tf.int32), boundaries, values)
       else:
-        cur_i = tf.ceil(tf.log((T_mul - 1.0) * (cur_epoch / T_0 + 1.0)) / tf.log(2.0))
-        T_beg = T_0 * (tf.pow(T_mul, cur_i) - 1.0) / (T_mul - 1.0)
-        T_i = T_0 * tf.pow(T_mul, cur_i)
-      
-      T_cur = cur_epoch - T_beg
-      learning_rate = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + tf.cos(T_cur / T_i * np.pi))
-    elif params['lr_schedule'] == 'decay':
-      batches_per_epoch = num_images / params['batch_size']
-      boundaries = [int(batches_per_epoch * epoch) for epoch in [100, 200, 300]]
-      values = [params['lr'] * decay for decay in [1, 0.1, 0.01, 0.001]]
-      learning_rate = tf.train.piecewise_constant(
-        tf.cast(global_step, tf.int32), boundaries, values)
-    else:
-      learning_rate = params['lr']
+        learning_rate = params['lr']
 
-    # Create a tensor named learning_rate for logging purposes
-    tf.identity(learning_rate, name='learning_rate')
-    tf.summary.scalar('learning_rate', learning_rate)
+      # Create a tensor named learning_rate for logging purposes
+      tf.identity(learning_rate, name='learning_rate')
+      tf.summary.scalar('learning_rate', learning_rate)
 
-    optimizer = tf.train.MomentumOptimizer(
-        learning_rate=learning_rate,
-        momentum=_MOMENTUM,
-        use_nesterov=params['use_nesterov'])
+      optimizer = tf.train.MomentumOptimizer(
+          learning_rate=learning_rate,
+          momentum=_MOMENTUM,
+          use_nesterov=params['use_nesterov'])
 
-    # Batch norm requires update ops to be added as a dependency to the train_op
-    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-    with tf.control_dependencies(update_ops):
-      #train_op = optimizer.minimize(loss, global_step)
-      gradients, variables = zip(*optimizer.compute_gradients(loss))
-      gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
-      train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
-  else:
-    train_op = None
+      sharded_logits = []
+      sharded_aux_logits = []
+    
+      inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
+      num_per_gpu = params['batch_size'] // params['num_gpus']
+      for i in range(params['num_gpus']):
+        inputs_shard = inputs[i*num_per_gpu:(i+1)*num_per_gpu]
+        with tf.device('/gpu:%d'%i):
+          res = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
+          logits = res['logits']
+          sharded_logits.append(logits)
+          if 'aux_logits' in res:
+            aux_logits = res['aux_logits']
+            sharded_aux_logits.append(aux_logits)
+          # Reuse variables for the next gpu.
+          tf.get_variable_scope().reuse_variables()
 
-  accuracy = tf.metrics.accuracy(
+      logits = tf.concat(sharded_logits, axis=0)
+      if aux_logits:
+        aux_logits = tf.concat(sharded_aux_logits, axis=0)
+
+      predictions = {
+        'classes': tf.argmax(logits, axis=1),
+        'probabilities': tf.nn.softmax(logits, name='softmax_tensor')
+      }
+
+      cross_entropy = tf.losses.softmax_cross_entropy(
+        logits=logits, onehot_labels=labels) 
+      # Add weight decay to the loss.
+      loss = cross_entropy + params['weight_decay'] * tf.add_n(
+        [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
+
+      if aux_logits:
+        aux_loss = tf.losses.softmax_cross_entropy(
+            logits=aux_logits, onehot_labels=labels, weights=params['aux_head_weight'])
+        loss += aux_loss
+      # Create a tensor named cross_entropy for logging purposes.
+      tf.identity(cross_entropy, name='cross_entropy')
+      tf.summary.scalar('cross_entropy', cross_entropy)
+
+      # Batch norm requires update ops to be added as a dependency to the train_op
+      update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+      with tf.control_dependencies(update_ops):
+        #train_op = optimizer.minimize(loss, global_step)
+        gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
+        train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
+    accuracy = tf.metrics.accuracy(
       tf.argmax(labels, axis=1), predictions['classes'])
-  metrics = {'accuracy': accuracy}
+    metrics = {'accuracy': accuracy}
 
-  # Create a tensor named train_accuracy for logging purposes
-  tf.identity(accuracy[1], name='train_accuracy')
-  tf.summary.scalar('train_accuracy', accuracy[1])
-
-  return tf.estimator.EstimatorSpec(
+    # Create a tensor named train_accuracy for logging purposes
+    tf.identity(accuracy[1], name='train_accuracy')
+    tf.summary.scalar('train_accuracy', accuracy[1])
+    return tf.estimator.EstimatorSpec(
       mode=mode,
-      predictions=predictions,
       loss=loss,
       train_op=train_op,
       eval_metric_ops=metrics)
+
+
+  elif mode == tf.estimator.ModeKeys.EVAL:
+    inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
+    res = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
+    logits = res['logits']
+    # Calculate loss, which includes softmax cross entropy and L2 regularization.
+    cross_entropy = tf.losses.softmax_cross_entropy(
+        logits=logits, onehot_labels=labels)
+
+    # Create a tensor named cross_entropy for logging purposes.
+    tf.identity(cross_entropy, name='cross_entropy')
+    tf.summary.scalar('cross_entropy', cross_entropy)
+
+    # Add weight decay to the loss.
+    loss = cross_entropy + params['weight_decay'] * tf.add_n(
+        [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
+
+    if 'aux_logits' in res:
+      aux_logits = res['aux_logits']
+      aux_loss = tf.losses.softmax_cross_entropy(
+        logits=aux_logits, onehot_labels=labels, weights=params['aux_head_weight'])
+      loss += aux_loss
+    accuracy = tf.metrics.accuracy(
+      tf.argmax(labels, axis=1), predictions['classes'])
+    metrics = {'accuracy': accuracy}
+
+    # Create a tensor named train_accuracy for logging purposes
+    tf.identity(accuracy[1], name='train_accuracy')
+    tf.summary.scalar('train_accuracy', accuracy[1])
+    return tf.estimator.EstimatorSpec(
+      mode=mode,
+      loss=loss,
+      eval_metric_ops=metrics)
+  else:
+    inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
+    res = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
+    logits = res['logits']
+
+    predictions = {
+        'classes': tf.argmax(logits, axis=1),
+        'probabilities': tf.nn.softmax(logits, name='softmax_tensor')
+    }
+    return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)  
 
 
 def build_dag(dag_name_or_path):
