@@ -329,7 +329,7 @@ def cifar10_model_fn(features, labels, mode, params):
       for i in range(params['num_gpus']):
         inputs_shard = inputs[i*num_per_gpu:(i+1)*num_per_gpu]
         with tf.device('/gpu:%d'%i):
-          res = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
+          res = model.build_model(inputs_shard, params, mode == tf.estimator.ModeKeys.TRAIN)
           logits = res['logits']
           sharded_logits.append(logits)
           if 'aux_logits' in res:
