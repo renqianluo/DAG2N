@@ -339,7 +339,7 @@ def cifar10_model_fn(features, labels, mode, params):
           tf.get_variable_scope().reuse_variables()
 
       logits = tf.concat(sharded_logits, axis=0)
-      if aux_logits:
+      if sharded_aux_logits:
         aux_logits = tf.concat(sharded_aux_logits, axis=0)
 
       predictions = {
@@ -353,7 +353,7 @@ def cifar10_model_fn(features, labels, mode, params):
       loss = cross_entropy + params['weight_decay'] * tf.add_n(
         [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
 
-      if aux_logits:
+      if sharded_aux_logits:
         aux_loss = tf.losses.softmax_cross_entropy(
             logits=aux_logits, onehot_labels=labels, weights=params['aux_head_weight'])
         loss += aux_loss
