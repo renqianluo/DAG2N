@@ -587,6 +587,8 @@ def build_model(inputs, params, is_training, reuse=False):
   total_steps = params['total_steps']
   if params['data_format'] is None:
     data_format = 'channels_first' if tf.test.is_built_with_cuda() else 'channels_last'
+  else:
+    data_format = params['data_format']
   num_classes = params['num_classes']
   stem_multiplier = params['stem_multiplier']
   use_aux_head = params['use_aux_head']

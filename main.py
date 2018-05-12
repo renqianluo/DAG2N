@@ -239,19 +239,14 @@ def input_fn(split, mode, data_dir, batch_size, num_epochs=1):
     else:
       dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train']+_NUM_IMAGES['valid'])
 
-  dataset = dataset.map(parse_record)
+  dataset = dataset.map(parse_record, num_parallel_calls=4)
   dataset = dataset.map(
-      lambda image, label: (preprocess_image(image, is_training), label))
+      lambda image, label: (preprocess_image(image, is_training), label),
+      num_parallel_calls=4)
 
-  dataset = dataset.prefetch(2 * batch_size)
-
-  # We call repeat after shuffling, rather than before, to prevent separate
-  # epochs from blending together.
   dataset = dataset.repeat(num_epochs)
-
-  # Batch results by up to batch_size, and then fetch the tuple from the
-  # iterator.
   dataset = dataset.batch(batch_size)
+  dataset = dataset.prefetch(1)
   iterator = dataset.make_one_shot_iterator()
   images, labels = iterator.get_next()
 
@@ -279,24 +274,27 @@ def _log_variable_sizes(var_list, tag):
 def cifar10_model_fn(features, labels, mode, params):
   """Model function for CIFAR-10."""
   if mode == tf.estimator.ModeKeys.TRAIN:
-    with tf.device('/cpu:0'):
+    if True:
+    #with tf.Graph().as_default(), tf.device('/gpu:0'):
       sharded_logits = []
       sharded_aux_logits = []
     
       inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
-      num_per_gpu = params['batch_size'] // params['num_gpus']
+      #num_per_gpu = params['batch_size'] // params['num_gpus']
+      num_per_gpu = tf.cast(tf.shape(inputs)[0] / params['num_gpus'], tf.int32)
       with tf.variable_scope(tf.get_variable_scope()):
         for i in range(params['num_gpus']):
-          inputs_shard = inputs[i*num_per_gpu:(i+1)*num_per_gpu]
-          with tf.device('/gpu:%d'%i):
-            res = model.build_model(inputs_shard, params, mode == tf.estimator.ModeKeys.TRAIN)
-            logits = res['logits']
-            sharded_logits.append(logits)
-            if 'aux_logits' in res:
-              aux_logits = res['aux_logits']
-              sharded_aux_logits.append(aux_logits)
-            # Reuse variables for the next gpu.
-            tf.get_variable_scope().reuse_variables()
+          with tf.name_scope('%s_%d' % ('parallel', i)) as scope:
+            inputs_shard = inputs[i*num_per_gpu:(i+1)*num_per_gpu]
+            with tf.device('/gpu:%d'%i):
+              res = model.build_model(inputs_shard, params, mode == tf.estimator.ModeKeys.TRAIN)
+              logits = res['logits']
+              sharded_logits.append(logits)
+              if 'aux_logits' in res:
+                aux_logits = res['aux_logits']
+                sharded_aux_logits.append(aux_logits)
+              # Reuse variables for the next gpu.
+              tf.get_variable_scope().reuse_variables()
 
       logits = tf.concat(sharded_logits, axis=0)
       if sharded_aux_logits:
@@ -388,6 +386,11 @@ def cifar10_model_fn(features, labels, mode, params):
     with tf.variable_scope(tf.get_variable_scope()):
       res = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
     logits = res['logits']
+    
+    predictions = {
+        'classes': tf.argmax(logits, axis=1),
+        'probabilities': tf.nn.softmax(logits, name='softmax_tensor')
+    }
     # Calculate loss, which includes softmax cross entropy and L2 regularization.
     cross_entropy = tf.losses.softmax_cross_entropy(
         logits=logits, onehot_labels=labels)
@@ -507,7 +510,7 @@ def main(unused_argv):
 
         logging_hook = tf.train.LoggingTensorHook(
             tensors=tensors_to_log, every_n_iter=100)
-
+        
         cifar_classifier.train(
             input_fn=lambda: input_fn(
               params['split_train_valid'], 'train', params['data_dir'], params['batch_size'],10),
