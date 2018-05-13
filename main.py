@@ -16,6 +16,7 @@ import time
 import datetime
 import model
 import dag
+from utils import data_parallelism
 
 _HEIGHT = 32
 _WIDTH = 32
@@ -281,6 +282,7 @@ def cifar10_model_fn(features, labels, mode, params):
     
       inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
       #num_per_gpu = params['batch_size'] // params['num_gpus']
+      """
       sharded_inputs = tf.split(inputs, params['num_gpus'], 0)
       with tf.variable_scope(tf.get_variable_scope()):
         for i in range(params['num_gpus']):
@@ -295,7 +297,12 @@ def cifar10_model_fn(features, labels, mode, params):
                 sharded_aux_logits.append(aux_logits)
               # Reuse variables for the next gpu.
               tf.get_variable_scope().reuse_variables()
-
+      """
+      dp = data_parallelism(params['num_gpus'])
+      sharded_inputs = dp(tf.identity, tf.split(inputs, params['num_gpus'], 0))
+      outputs = dp(model.build_model, sharded_inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
+      sharded_logits = [res['logits'] for res in outputs]
+      sharded_aux_logits = [res['aux_logits'] for res in outputs]
       logits = tf.concat(sharded_logits, axis=0)
       if sharded_aux_logits:
         aux_logits = tf.concat(sharded_aux_logits, axis=0)

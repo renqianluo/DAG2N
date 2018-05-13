@@ -2,6 +2,29 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+def _add_variable_proxy_methods(var, proxy_tensor):
+  """Proxy methods of underlying variable.
+
+  This enables our custom getters to still work with, e.g., batch norm.
+
+  Args:
+    var: Variable to proxy
+    proxy_tensor: Tensor that is identity of var
+  """
+  proxy_tensor.read_value = lambda: tf.identity(proxy_tensor)
+  proxy_tensor.assign_sub = var.assign_sub
+
+def transpose_list_of_lists(lol):
+  """Transpose a list of equally-sized python lists.
+
+  Args:
+    lol: a list of lists
+  Returns:
+    a list of lists
+  """
+  assert lol, "cannot pass the empty list"
+  return [list(x) for x in zip(*lol)]
+
 class Parallelism(object):
   """Helper class for creating sets of parallel function calls.
 
@@ -187,7 +210,7 @@ def data_parallelism(worker_gpu=1):
     caching_devices = None
   tf.logging.info("datashard_devices: %s", datashard_devices)
   tf.logging.info("caching_devices: %s", caching_devices)
-  return eu.Parallelism(
+  return Parallelism(
       datashard_devices,
       reuse=True,
       caching_devices=caching_devices,
