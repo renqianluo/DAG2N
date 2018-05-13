@@ -281,11 +281,11 @@ def cifar10_model_fn(features, labels, mode, params):
     
       inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
       #num_per_gpu = params['batch_size'] // params['num_gpus']
-      num_per_gpu = tf.cast(tf.shape(inputs)[0] / params['num_gpus'], tf.int32)
+      sharded_inputs = tf.split(inputs, params['num_gpus'], 0)
       with tf.variable_scope(tf.get_variable_scope()):
         for i in range(params['num_gpus']):
           with tf.name_scope('%s_%d' % ('parallel', i)) as scope:
-            inputs_shard = inputs[i*num_per_gpu:(i+1)*num_per_gpu]
+            inputs_shard = sharded_inputs[i]
             with tf.device('/gpu:%d'%i):
               res = model.build_model(inputs_shard, params, mode == tf.estimator.ModeKeys.TRAIN)
               logits = res['logits']
