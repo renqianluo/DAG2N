@@ -16,7 +16,7 @@ import time
 import datetime
 import model
 import dag
-from utils import data_parallelism
+#from utils import data_parallelism
 
 _HEIGHT = 32
 _WIDTH = 32
@@ -33,6 +33,7 @@ _NUM_IMAGES = {
     'test': 10000,
 }
 
+_TEST_BATCH_SIZE = 100
 
 parser = argparse.ArgumentParser()
 
@@ -46,9 +47,6 @@ parser.add_argument('--data_dir', type=str, default='/tmp/cifar10_data',
 
 parser.add_argument('--model_dir', type=str, default='/tmp/cifar10_model',
                     help='The directory where the model will be stored.')
-
-parser.add_argument('--previous_steps', type=int, default=0,
-                    help='Previous steps when restored.')
 
 parser.add_argument('--num_nodes', type=int, default=7,
                     help='The number of nodes in a cell.')
@@ -68,7 +66,7 @@ parser.add_argument('--dense_dropout_keep_prob', type=float, default=1.0,
 parser.add_argument('--stem_multiplier', type=float, default=3.0,
                     help='Stem convolution multiplier. Default is 3.0 for CIFAR-10. 1.0 is for ImageNet.')
 
-parser.add_argument('--train_epochs', type=int, default=310,
+parser.add_argument('--train_epochs', type=int, default=600,
                     help='The number of epochs to train.')
 
 parser.add_argument('--epochs_per_eval', type=int, default=10,
@@ -103,6 +101,9 @@ parser.add_argument('--aux_head_weight', type=float, default=0.4,
 
 parser.add_argument('--weight_decay', type=float, default=_WEIGHT_DECAY,
                     help='Weight decay.')
+
+parser.add_argument('--cutout_size', type=int, default=None,
+                    help='Size of cutout. Default to None, means no cutout.')
 
 parser.add_argument('--num_gpus', type=int, default=1,
                     help='Number of GPU to use.')
@@ -197,9 +198,9 @@ def parse_record(raw_record):
   return image, label
 
 
-def preprocess_image(image, is_training):
+def preprocess_image(image, mode, cutout_size):
   """Preprocess a single image of layout [height, width, depth]."""
-  if is_training:
+  if mode == 'train':
     # Resize the image to add four extra pixels on each side.
     image = tf.image.resize_image_with_crop_or_pad(
         image, _HEIGHT + 8, _WIDTH + 8)
@@ -212,14 +213,25 @@ def preprocess_image(image, is_training):
 
   # Subtract off the mean and divide by the variance of the pixels.
   image = tf.image.per_image_standardization(image)
+
+  if mode == 'train' and cutout_size is not None:
+    mask = tf.ones([cutout_size, cutout_size], dtype=tf.int32)
+    start = tf.random_uniform([2], minval=0, maxval=32, dtype=tf.int32)
+    mask = tf.pad(mask, [[cutout_size + start[0], 32 - start[0]],
+                        [cutout_size + start[1], 32 - start[1]]])
+    mask = mask[cutout_size: cutout_size + 32,
+                cutout_size: cutout_size + 32]
+    mask = tf.reshape(mask, [32, 32, 1])
+    mask = tf.tile(mask, [1, 1, 3])
+    image = tf.where(tf.equal(mask, 0), x=image, y=tf.zeros_like(image))
   return image
 
 
-def input_fn(split, mode, data_dir, batch_size, num_epochs=1):
+def input_fn(split, mode, data_dir, batch_size, cutout_size, num_epochs=1):
   """Input_fn using the tf.data input pipeline for CIFAR-10 dataset.
 
   Args:
-    is_training: A boolean denoting whether the input is for training.
+    mode: train, valid or test.
     data_dir: The directory containing the input data.
     batch_size: The number of samples per batch.
     num_epochs: The number of epochs to repeat the dataset.
@@ -228,13 +240,8 @@ def input_fn(split, mode, data_dir, batch_size, num_epochs=1):
     A tuple of images and labels.
   """
   dataset = record_dataset(get_filenames(split, mode, data_dir))
-  is_training = mode in ['train', 'valid']
 
-
-  if is_training:
-    # When choosing shuffle buffer sizes, larger sizes result in better
-    # randomness, while smaller sizes have better performance. Because CIFAR-10
-    # is a relatively small dataset, we choose to shuffle the full epoch.
+  if mode == 'train':
     if split:
       dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train'])
     else:
@@ -242,12 +249,12 @@ def input_fn(split, mode, data_dir, batch_size, num_epochs=1):
 
   dataset = dataset.map(parse_record, num_parallel_calls=4)
   dataset = dataset.map(
-      lambda image, label: (preprocess_image(image, is_training), label),
+      lambda image, label: (preprocess_image(image, mode, cutout_size), label),
       num_parallel_calls=4)
 
   dataset = dataset.repeat(num_epochs)
   dataset = dataset.batch(batch_size)
-  dataset = dataset.prefetch(1)
+  dataset = dataset.prefetch(10)
   iterator = dataset.make_one_shot_iterator()
   images, labels = iterator.get_next()
 
@@ -272,171 +279,262 @@ def _log_variable_sizes(var_list, tag):
   tf.logging.info("%s Total size: %d", tag, total_size)
 
 
-def cifar10_model_fn(features, labels, mode, params):
-  """Model function for CIFAR-10."""
-  if mode == tf.estimator.ModeKeys.TRAIN:
-    if True:
-    #with tf.Graph().as_default(), tf.device('/gpu:0'):
-      sharded_logits = []
-      sharded_aux_logits = []
+def average_gradients(tower_grads):
+  """Calculate the average gradient for each shared variable across all towers.
+  Note that this function provides a synchronization point across all towers.
+  Args:
+    tower_grads: List of lists of (gradient, variable) tuples. The outer list
+      is over individual gradients. The inner list is over the gradient
+      calculation for each tower.
+  Returns:
+     List of pairs of (gradient, variable) where the gradient has been averaged
+     across all towers.
+  """
+  average_grads = []
+  for grad_and_vars in zip(*tower_grads):
+    # Note that each grad_and_vars looks like the following:
+    #   ((grad0_gpu0, var0_gpu0), ... , (grad0_gpuN, var0_gpuN))
+    grads = []
+    for g, _ in grad_and_vars:
+      # Add 0 dimension to the gradients to represent the tower.
+      expanded_g = tf.expand_dims(g, 0)
+
+      # Append on a 'tower' dimension which we will average over below.
+      grads.append(expanded_g)
+
+    # Average over the 'tower' dimension.
+    grad = tf.concat(axis=0, values=grads)
+    grad = tf.reduce_mean(grad, 0)
+
+    # Keep in mind that the Variables are redundant because they are shared
+    # across towers. So .. we will just return the first tower's pointer to
+    # the Variable.
+    v = grad_and_vars[0][1]
+    grad_and_var = (grad, v)
+    average_grads.append(grad_and_var)
+  return average_grads
+
+
+def get_train_ops(x, y, params, reuse=False):
+  global_step = tf.train.get_or_create_global_step()
+
+  num_images = _NUM_IMAGES['train'] if params['split_train_valid'] else _NUM_IMAGES['train'] + _NUM_IMAGES['valid']
+
+  if params['lr_schedule'] == 'cosine':
+    lr_max = params['lr_max']
+    lr_min = params['lr_min']
+    T_0 = tf.constant(params['T_0'], dtype=tf.float32)
+    T_mul = tf.constant(params['T_mul'], dtype=tf.float32)
+    batches_per_epoch = math.ceil(num_images / params['batch_size'])
+    params['batches_per_epoch'] = batches_per_epoch
     
-      inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
-      #num_per_gpu = params['batch_size'] // params['num_gpus']
-      """
-      sharded_inputs = tf.split(inputs, params['num_gpus'], 0)
-      with tf.variable_scope(tf.get_variable_scope()):
-        for i in range(params['num_gpus']):
-          with tf.name_scope('%s_%d' % ('parallel', i)) as scope:
-            inputs_shard = sharded_inputs[i]
-            with tf.device('/gpu:%d'%i):
-              res = model.build_model(inputs_shard, params, mode == tf.estimator.ModeKeys.TRAIN)
-              logits = res['logits']
-              sharded_logits.append(logits)
-              if 'aux_logits' in res:
-                aux_logits = res['aux_logits']
-                sharded_aux_logits.append(aux_logits)
-              # Reuse variables for the next gpu.
-              tf.get_variable_scope().reuse_variables()
-      """
-      dp = data_parallelism(params['num_gpus'])
-      sharded_inputs = dp(tf.identity, tf.split(inputs, params['num_gpus'], 0))
-      outputs = dp(model.build_model, sharded_inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
-      sharded_logits = [res['logits'] for res in outputs]
-      sharded_aux_logits = [res['aux_logits'] for res in outputs]
-      logits = tf.concat(sharded_logits, axis=0)
-      if sharded_aux_logits:
-        aux_logits = tf.concat(sharded_aux_logits, axis=0)
-
-      predictions = {
-        'classes': tf.argmax(logits, axis=1),
-        'probabilities': tf.nn.softmax(logits, name='softmax_tensor')
-      }
-
-      cross_entropy = tf.losses.softmax_cross_entropy(
-        logits=logits, onehot_labels=labels) 
-      # Add weight decay to the loss.
-      loss = cross_entropy + params['weight_decay'] * tf.add_n(
-        [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
-
-      if sharded_aux_logits:
-        aux_loss = tf.losses.softmax_cross_entropy(
-            logits=aux_logits, onehot_labels=labels, weights=params['aux_head_weight'])
-        loss += aux_loss
-      # Create a tensor named cross_entropy for logging purposes.
-      tf.identity(cross_entropy, name='cross_entropy')
-      tf.summary.scalar('cross_entropy', cross_entropy)
-
-      global_step = tf.train.get_or_create_global_step()
-
-      num_images = _NUM_IMAGES['train'] if params['split_train_valid'] else _NUM_IMAGES['train'] + _NUM_IMAGES['valid']
-
-      if params['lr_schedule'] == 'cosine':
-        lr_max = params['lr_max']
-        lr_min = params['lr_min']
-        T_0 = tf.constant(params['T_0'], dtype=tf.float32)
-        T_mul = tf.constant(params['T_mul'], dtype=tf.float32)
-        batches_per_epoch = math.ceil(num_images / params['batch_size'])
+    cur_epoch = tf.floor(tf.cast(global_step, dtype=tf.float32) / batches_per_epoch)
+    if params['T_mul'] == 1:
+      cur_i = tf.floor(cur_epoch / T_0)
+      T_beg = T_0 * cur_i
+      T_i = T_0
+    else:
+      cur_i = tf.ceil(tf.log((T_mul - 1.0) * (cur_epoch / T_0 + 1.0)) / tf.log(2.0))
+      T_beg = T_0 * (tf.pow(T_mul, cur_i) - 1.0) / (T_mul - 1.0)
+      T_i = T_0 * tf.pow(T_mul, cur_i)
         
-        cur_epoch = tf.floor(tf.cast(global_step, dtype=tf.float32) / batches_per_epoch)
-        if params['T_mul'] == 1:
-          cur_i = tf.floor(cur_epoch / T_0)
-          T_beg = T_0 * cur_i
-          T_i = T_0
-        else:
-          cur_i = tf.ceil(tf.log((T_mul - 1.0) * (cur_epoch / T_0 + 1.0)) / tf.log(2.0))
-          T_beg = T_0 * (tf.pow(T_mul, cur_i) - 1.0) / (T_mul - 1.0)
-          T_i = T_0 * tf.pow(T_mul, cur_i)
-        
-        T_cur = cur_epoch - T_beg
-        learning_rate = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + tf.cos(T_cur / T_i * np.pi))
-      elif params['lr_schedule'] == 'decay':
-        batches_per_epoch = num_images / params['batch_size']
-        boundaries = [int(batches_per_epoch * epoch) for epoch in [100, 200, 300]]
-        values = [params['lr'] * decay for decay in [1, 0.1, 0.01, 0.001]]
-        learning_rate = tf.train.piecewise_constant(
-          tf.cast(global_step, tf.int32), boundaries, values)
-      else:
-        learning_rate = params['lr']
+    T_cur = cur_epoch - T_beg
+    learning_rate = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + tf.cos(T_cur / T_i * np.pi))
+  elif params['lr_schedule'] == 'decay':
+    batches_per_epoch = num_images / params['batch_size']
+    boundaries = [int(batches_per_epoch * epoch) for epoch in [100, 200, 300]]
+    values = [params['lr'] * decay for decay in [1, 0.1, 0.01, 0.001]]
+    learning_rate = tf.train.piecewise_constant(
+      tf.cast(global_step, tf.int32), boundaries, values)
+  else:
+    learning_rate = params['lr']
 
-      # Create a tensor named learning_rate for logging purposes
-      tf.identity(learning_rate, name='learning_rate')
-      tf.summary.scalar('learning_rate', learning_rate)
+  tf.summary.scalar('learning_rate', learning_rate)
 
-      optimizer = tf.train.MomentumOptimizer(
-          learning_rate=learning_rate,
-          momentum=_MOMENTUM,
-          use_nesterov=params['use_nesterov'])
+  optimizer = tf.train.MomentumOptimizer(
+      learning_rate=learning_rate,
+      momentum=_MOMENTUM,
+      use_nesterov=params['use_nesterov'])
 
-      # Batch norm requires update ops to be added as a dependency to the train_op
-      update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-      with tf.control_dependencies(update_ops):
-        #train_op = optimizer.minimize(loss, global_step)
-        gradients, variables = zip(*optimizer.compute_gradients(loss))
-        gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
-        train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
-      accuracy = tf.metrics.accuracy(
-        tf.argmax(labels, axis=1), predictions['classes'])
-      metrics = {'accuracy': accuracy}
+  inputs = tf.reshape(x, [-1, _HEIGHT, _WIDTH, _DEPTH])
+  labels = y
+  inputs_sharded = tf.split(inputs, params['num_gpus'], axis=0)
+  labels_sharded = tf.split(labels, params['num_gpus'], axis=0)
+  loss_sharded = []
+  tower_grads = []
+  train_accuracy_sharded = []
+  for i in range(params['num_gpus']):
+    with tf.device('/gpu:%d'%i):
+      with tf.name_scope('shard_%d'%i):
+        res = model.build_model(inputs_sharded[i], params, True, reuse if i==0 else True)
+        logits = res['logits']
+        cross_entropy = tf.losses.softmax_cross_entropy(
+          logits=logits, onehot_labels=labels_sharded[i])
+        if 'aux_logits' in res:
+          aux_logits = res['aux_logits']
+          aux_loss = tf.losses.softmax_cross_entropy(
+            logits=aux_logits, onehot_labels=labels_sharded[i], weights=params['aux_head_weight'])
+        loss = cross_entropy + aux_loss
+        loss = loss + params['weight_decay'] * tf.add_n(
+          [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
+        grads = optimizer.compute_gradients(loss)
+        tower_grads.append(grads)
+        loss_sharded.append(loss)
+        predictions = tf.argmax(logits, axis=1)
+        train_accuracy = tf.reduce_mean(
+          tf.cast(
+            tf.equal(predictions, tf.argmax(labels_sharded[i], axis=1)), 
+            dtype=tf.float32))
+        train_accuracy_sharded.append(train_accuracy)
 
-      # Create a tensor named train_accuracy for logging purposes
-      tf.identity(accuracy[1], name='train_accuracy')
-      tf.summary.scalar('train_accuracy', accuracy[1])
-      return tf.estimator.EstimatorSpec(
-        mode=mode,
-        loss=loss,
-        train_op=train_op,
-        eval_metric_ops=metrics)
+  loss = tf.reduce_mean(loss_sharded, axis=0)
+  tf.summary.scalar('training_loss', loss)
+  train_accuracy = tf.reduce_mean(train_accuracy_sharded, axis=0)
+  tf.summary.scalar('train_accuracy', train_accuracy)
+  grads = average_gradients(tower_grads)
+  # Batch norm requires update ops to be added as a dependency to the train_op
+  update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+  with tf.control_dependencies(update_ops):
+    #gradients, variables = zip(*optimizer.compute_gradients(loss))
+    #gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
+    #train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
+    gradients, variables = zip(*grads)
+    gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
+    train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
+  
+  return loss, learning_rate, train_accuracy, train_op, global_step
 
-
-  elif mode == tf.estimator.ModeKeys.EVAL:
-    inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
-    with tf.variable_scope(tf.get_variable_scope()):
-      res = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
+def get_valid_ops(x, y, params, reuse=False):
+  with tf.device('/gpu:0'):
+    inputs = tf.reshape(x, [-1, _HEIGHT, _WIDTH, _DEPTH])
+    labels = y
+    res = model.build_model(inputs, params, False, reuse)
     logits = res['logits']
-    
-    predictions = {
-        'classes': tf.argmax(logits, axis=1),
-        'probabilities': tf.nn.softmax(logits, name='softmax_tensor')
-    }
-    # Calculate loss, which includes softmax cross entropy and L2 regularization.
     cross_entropy = tf.losses.softmax_cross_entropy(
-        logits=logits, onehot_labels=labels)
-
-    # Create a tensor named cross_entropy for logging purposes.
-    tf.identity(cross_entropy, name='cross_entropy')
-    tf.summary.scalar('cross_entropy', cross_entropy)
-
+      logits=logits, onehot_labels=labels)
     # Add weight decay to the loss.
     loss = cross_entropy + params['weight_decay'] * tf.add_n(
-        [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
+      [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
 
     if 'aux_logits' in res:
       aux_logits = res['aux_logits']
       aux_loss = tf.losses.softmax_cross_entropy(
         logits=aux_logits, onehot_labels=labels, weights=params['aux_head_weight'])
       loss += aux_loss
-    accuracy = tf.metrics.accuracy(
-      tf.argmax(labels, axis=1), predictions['classes'])
-    metrics = {'accuracy': accuracy}
+    predictions = tf.argmax(logits, axis=1)
+    labels = tf.argmax(y, axis=1)
+    valid_accuracy = tf.reduce_mean(tf.cast(tf.equal(predictions, labels), dtype=tf.float32))
+    return loss, valid_accuracy
 
-    # Create a tensor named train_accuracy for logging purposes
-    tf.identity(accuracy[1], name='train_accuracy')
-    tf.summary.scalar('train_accuracy', accuracy[1])
-    return tf.estimator.EstimatorSpec(
-      mode=mode,
-      loss=loss,
-      eval_metric_ops=metrics)
-  else:
-    inputs = tf.reshape(features, [-1, _HEIGHT, _WIDTH, _DEPTH])
-    with tf.variable_scope(tf.get_variable_scope()):
-      res = model.build_model(inputs, params, mode == tf.estimator.ModeKeys.TRAIN)
+def get_test_ops(x, y, params, reuse=False):
+  with tf.device('/gpu:0'):
+    inputs = tf.reshape(x, [-1, _HEIGHT, _WIDTH, _DEPTH])
+    labels = y
+    res = model.build_model(inputs, params, False, reuse)
     logits = res['logits']
+    cross_entropy = tf.losses.softmax_cross_entropy(
+      logits=logits, onehot_labels=labels)
+    # Add weight decay to the loss.
+    loss = cross_entropy + params['weight_decay'] * tf.add_n(
+      [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
 
-    predictions = {
-        'classes': tf.argmax(logits, axis=1),
-        'probabilities': tf.nn.softmax(logits, name='softmax_tensor')
-    }
-    return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)  
+    if 'aux_logits' in res:
+      aux_logits = res['aux_logits']
+      aux_loss = tf.losses.softmax_cross_entropy(
+        logits=aux_logits, onehot_labels=labels, weights=params['aux_head_weight'])
+      loss += aux_loss
+
+    predictions = tf.argmax(logits, axis=1)
+    labels = tf.argmax(y, axis=1)
+    test_accuracy = tf.reduce_mean(tf.cast(tf.equal(predictions, labels), dtype=tf.float32))
+    return loss, test_accuracy
+
+def train(params):
+  g = tf.Graph()
+  with g.as_default(), tf.device('/cpu:0'):
+    x_train, y_train = input_fn(params['split_train_valid'], 'train', params['data_dir'], params['batch_size'], params['cutout_size'], None)
+    if params['split_train_valid']:
+      x_valid, y_valid = input_fn(params['split_train_valid'], 'valid', params['data_dir'], 100, None, None)
+    else:
+      x_valid, y_valid = None, None
+    x_test, y_test = input_fn(False, 'test', params['data_dir'], 100, None, None)
+    train_loss, learning_rate, train_accuracy, train_op, global_step = get_train_ops(x_train, y_train, params)
+    _log_variable_sizes(tf.trainable_variables(), 'Trainable Variables')
+    if x_valid and y_valid:
+      valid_loss, valid_accuracy = get_valid_ops(x_valid, y_valid, params, True)
+    test_loss, test_accuracy = get_test_ops(x_test, y_test, params, True)
+    saver = tf.train.Saver(max_to_keep=10)
+    checkpoint_saver_hook = tf.train.CheckpointSaverHook(
+      params['model_dir'], save_steps=params['batches_per_epoch'], saver=saver)
+    hooks = [checkpoint_saver_hook]
+    tf.logging.info('Starting Session')
+    config = tf.ConfigProto(allow_soft_placement=True)
+    with tf.train.SingularMonitoredSession(
+      config=config, hooks=hooks, checkpoint_dir=params['model_dir']) as sess:
+      start_time = time.time()
+      while True:
+        run_ops = [
+          train_loss,
+          learning_rate,
+          train_accuracy,
+          train_op,
+          global_step
+        ]
+        train_loss_v, learning_rate_v, train_accuracy_v, _, global_step_v = sess.run(run_ops)
+
+        epoch = global_step_v // params['batches_per_epoch'] 
+        curr_time = time.time()
+        if global_step_v % 100 == 0:
+          log_string = "epoch={:<6d} ".format(epoch)
+          log_string += "step={:<6d} ".format(global_step_v)
+          log_string += "loss={:<6f} ".format(train_loss_v)
+          log_string += "learning_rate={:<8.4f} ".format(learning_rate_v)
+          log_string += "training_accuracy={:<8.4f} ".format(train_accuracy_v)
+          log_string += "mins={:<10.2f}".format((curr_time - start_time) / 60)
+          tf.logging.info(log_string)
+        if global_step_v % params['batches_per_epoch'] == 0:
+          if x_valid and y_valid:
+            valid_ops = [
+              valid_loss, valid_accuracy
+            ]
+            valid_start_time = time.time()
+            valid_loss_list = []
+            valid_accuracy_list = []
+            for _ in range(_NUM_IMAGES['valid'] // 100):
+              valid_loss_v, valid_accuracy_v = sess.run(valid_ops)
+              valid_loss_list.append(valid_loss_v)
+              valid_accuracy_list.append(valid_accuracy_v)
+            valid_time = time.time() - valid_start_time
+            log_string =  "Evaluation on valid data\n"
+            log_string += "epoch={:<6d} ".format(epoch)
+            log_string += "step={:<6d} ".format(global_step_v)
+            log_string += "loss={:<6f} ".format(np.mean(valid_loss_list))
+            log_string += "learning_rate={:<8.6f} ".format(learning_rate_v)
+            log_string += "valid_accuracy={:<8.6f} ".format(np.mean(valid_accuracy_list))
+            log_string += "secs={:<10.2f}".format((valid_time))
+            tf.logging.info(log_string)
+          
+          test_ops = [
+            test_loss, test_accuracy
+          ]
+          test_start_time = time.time()
+          test_loss_list = []
+          test_accuracy_list = []
+          for _ in range(_NUM_IMAGES['test'] // 100):
+            test_loss_v, test_accuracy_v = sess.run(test_ops)
+            test_loss_list.append(test_loss_v)
+            test_accuracy_list.append(test_accuracy_v)
+          test_time = time.time() - test_start_time
+          log_string =  "Evaluation on test data\n"
+          log_string += "epoch={:<6d} ".format(epoch)
+          log_string += "step={:<6d} ".format(global_step_v)
+          log_string += "loss={:<6f} ".format(np.mean(test_loss_list))
+          log_string += "learning_rate={:<8.6f} ".format(learning_rate_v)
+          log_string += "test_accuracy={:<8.6f} ".format(np.mean(test_accuracy_list))
+          log_string += "secs={:<10.2f}".format((test_time))
+          tf.logging.info(log_string)
+        if epoch >= params['train_epochs']:
+          break
 
 
 def build_dag(dag_name_or_path):
@@ -479,123 +577,12 @@ def main(unused_argv):
 
   if FLAGS.mode == 'train':
     params = get_params()
-
-    cifar10_model_fn(tf.zeros([32 ,32 ,32 ,3]),
-      tf.one_hot(tf.ones([32], dtype=tf.uint8), _NUM_CLASSES),
-      tf.estimator.ModeKeys.TRAIN, params)
-
-    _log_variable_sizes(tf.trainable_variables(), 'Trainable Variables')
-
     with open(os.path.join(params['model_dir'], 'hparams.json'), 'w') as f:
       json.dump(params, f)
-    
-    if os.path.exists(os.path.join(params['model_dir'], 'checkpoint')):
-      with open(os.path.join(params['model_dir'], 'checkpoint'), 'r') as f:
-        line = f.readline()
-        line = line.strip().split(' ')[-1]
-        line = line.split('-')[-1][:-1]
-        previous_step = int(line)
-        num_images = _NUM_IMAGES['train'] if params['split_train_valid'] else _NUM_IMAGES['train'] + _NUM_IMAGES['valid']
-        batches_per_epoch = num_images / params['batch_size']
-        start_epoch = previous_step // batches_per_epoch
-    else:
-      start_epoch = 0
+    train(params)
 
-    # Set up a RunConfig to only save checkpoints once per training cycle.
-    run_config = tf.estimator.RunConfig().replace(save_checkpoints_secs=1e9)
-    cifar_classifier = tf.estimator.Estimator(
-      model_fn=cifar10_model_fn, model_dir=params['model_dir'], config=run_config,
-      params=params)
-    if start_epoch < params['eval_after']: 
-      start_epoch_loop = int(start_epoch // 10)#FLAGS.epochs_per_eval)
-      for _ in range(start_epoch_loop, params['eval_after'] // 10):
-        tensors_to_log = {
-            'learning_rate': 'learning_rate',
-            'cross_entropy': 'cross_entropy',
-            'train_accuracy': 'train_accuracy'
-        }
-
-        logging_hook = tf.train.LoggingTensorHook(
-            tensors=tensors_to_log, every_n_iter=100)
-        
-        cifar_classifier.train(
-            input_fn=lambda: input_fn(
-              params['split_train_valid'], 'train', params['data_dir'], params['batch_size'],10),
-              hooks=[logging_hook])
-
-      rest_epochs = params['train_epochs'] - params['eval_after']
-      start_epoch_loop = 0
-      for _ in range(start_epoch_loop, rest_epochs // params['epochs_per_eval']):
-        tensors_to_log = {
-            'learning_rate': 'learning_rate',
-            'cross_entropy': 'cross_entropy',
-            'train_accuracy': 'train_accuracy'
-        }
-
-        logging_hook = tf.train.LoggingTensorHook(
-            tensors=tensors_to_log, every_n_iter=100)
-
-        cifar_classifier.train(
-            input_fn=lambda: input_fn(
-              params['split_train_valid'], 'train', params['data_dir'], params['batch_size'], params['epochs_per_eval']),
-              hooks=[logging_hook])
-
-        if params['split_train_valid']:
-          # Valid the model and print results
-          eval_results = cifar_classifier.evaluate(
-              input_fn=lambda: input_fn(params['split_train_valid'], 'valid', params['data_dir'], params['batch_size']))
-          tf.logging.info('Evaluation on valid data set')
-          print(eval_results)
-      
-        # Evaluate the model and print results
-        eval_results = cifar_classifier.evaluate(
-            input_fn=lambda: input_fn(params['split_train_valid'], 'test', params['data_dir'], params['batch_size']))
-        tf.logging.info('Evaluation on test data set')
-        print(eval_results)
-
-    else:
-      eval_epochs = params['train_epochs'] - params['eval_after']
-      start_epoch_from_eval = start_epoch - params['eval_after']
-      start_epoch_loop = int(start_epoch_from_eval // params['epochs_per_eval'])
-      for _ in range(start_epoch_loop, eval_epochs // params['epochs_per_eval']):
-        tensors_to_log = {
-            'learning_rate': 'learning_rate',
-            'cross_entropy': 'cross_entropy',
-            'train_accuracy': 'train_accuracy'
-        }
-
-        logging_hook = tf.train.LoggingTensorHook(
-            tensors=tensors_to_log, every_n_iter=100)
-
-        cifar_classifier.train(
-            input_fn=lambda: input_fn(
-              params['split_train_valid'], 'train', params['data_dir'], params['batch_size'], params['epochs_per_eval']),
-              hooks=[logging_hook])
-
-        if params['split_train_valid']:
-          # Valid the model and print results
-          eval_results = cifar_classifier.evaluate(
-              input_fn=lambda: input_fn(params['split_train_valid'], 'valid', params['data_dir'], params['batch_size']))
-          tf.logging.info('Evaluation on valid data set')
-          print(eval_results)
-      
-        # Evaluate the model and print results
-        eval_results = cifar_classifier.evaluate(
-            input_fn=lambda: input_fn(params['split_train_valid'], 'test', params['data_dir'], params['batch_size']))
-        tf.logging.info('Evaluation on test data set')
-        print(eval_results)
   elif FLAGS.mode == 'test':
-    if not os.path.exists(os.path.join(FLAGS.model_dir, 'hparams.json')):
-      raise ValueError('No hparams.json found in {0}'.format(FLAGS.model_dir))
-    with open(os.path.join(FLAGS.model_dir, 'hparams.json'), 'r') as f:
-      params = json.load(f)
-  
-    cifar_classifier = tf.estimator.Estimator(
-      model_fn=cifar10_model_fn, model_dir=FLAGS.model_dir, params=params)
-    eval_results = cifar_classifier.evaluate(
-          input_fn=lambda: input_fn(False, 'test', FLAGS.data_dir, params['batch_size']))
-    tf.logging.info('Evaluation on test data set')
-    print(eval_results)
+    pass
 
 
 if __name__ == '__main__':

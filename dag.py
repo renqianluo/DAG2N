@@ -103,3 +103,63 @@ def NASNet_A():
   reduc_dag['loose_ends'] = ['node_4', 'node_5', 'node_6', 'node_7']
 
   return conv_dag, reduc_dag
+
+
+def PNASNet_A():
+  conv_dag = OrderedDict()
+  conv_dag['node_1'] = ['node_1', None, None, None, None]
+  conv_dag['node_2'] = ['node_2', None, None, None, None]
+  conv_dag['node_3'] = ['node_3', 'node_2', 'node_2', 'sep_conv 3x3', 'identity']
+  conv_dag['node_4'] = ['node_4', 'node_1', 'node_2', 'sep_conv 3x3', 'sep_conv 5x5']
+  conv_dag['node_5'] = ['node_5', 'node_2', 'node_1', 'avg_pool 3x3', 'identity']
+  conv_dag['node_6'] = ['node_6', 'node_1', 'node_1', 'avg_pool 3x3', 'avg_pool 3x3']
+  conv_dag['node_7'] = ['node_7', 'node_1', 'node_1', 'sep_conv 5x5', 'sep_conv 3x3']
+  conv_dag['loose_ends'] = ['node_1', 'node_3', 'node_4', 'node_5', 'node_6', 'node_7']
+
+  reduc_dag = OrderedDict()
+  reduc_dag['node_1'] = ['node_1', None, None, None, None]
+  reduc_dag['node_2'] = ['node_2', None, None, None, None]
+  reduc_dag['node_3'] = ['node_3', 'node_1', 'node_2', 'sep_conv 7x7', 'sep_conv 5x5']
+  reduc_dag['node_4'] = ['node_4', 'node_2', 'node_1', 'max_pool 3x3', 'sep_conv 7x7']
+  reduc_dag['node_5'] = ['node_5', 'node_2', 'node_1', 'avg_pool 3x3', 'sep_conv 5x5']
+  reduc_dag['node_6'] = ['node_6', 'node_2', 'node_3', 'max_pool 3x3', 'sep_conv 3x3']
+  reduc_dag['node_7'] = ['node_7', 'node_3', 'node_4', 'avg_pool 3x3', 'identity']
+  reduc_dag['loose_ends'] = ['node_4', 'node_5', 'node_6', 'node_7']
+
+  return conv_dag, reduc_dag
+def NASNet_A():
+  conv_dag = OrderedDict()
+  conv_dag['node_1'] = ['node_1', None, None, None, None]
+  conv_dag['node_2'] = ['node_2', None, None, None, None]
+  conv_dag['node_3'] = ['node_3', 'node_2', 'node_2', 'sep_conv 3x3', 'identity']
+  conv_dag['node_4'] = ['node_4', 'node_1', 'node_2', 'sep_conv 3x3', 'sep_conv 5x5']
+  conv_dag['node_5'] = ['node_5', 'node_2', 'node_1', 'avg_pool 3x3', 'identity']
+  conv_dag['node_6'] = ['node_6', 'node_1', 'node_1', 'avg_pool 3x3', 'avg_pool 3x3']
+  conv_dag['node_7'] = ['node_7', 'node_1', 'node_1', 'sep_conv 5x5', 'sep_conv 3x3']
+  conv_dag['loose_ends'] = ['node_1', 'node_3', 'node_4', 'node_5', 'node_6', 'node_7']
+
+  reduc_dag = OrderedDict()
+  reduc_dag['node_1'] = ['node_1', None, None, None, None]
+  reduc_dag['node_2'] = ['node_2', None, None, None, None]
+  reduc_dag['node_3'] = ['node_3', 'node_1', 'node_2', 'sep_conv 7x7', 'sep_conv 5x5']
+  reduc_dag['node_4'] = ['node_4', 'node_2', 'node_1', 'max_pool 3x3', 'sep_conv 7x7']
+  reduc_dag['node_5'] = ['node_5', 'node_2', 'node_1', 'avg_pool 3x3', 'sep_conv 5x5']
+  reduc_dag['node_6'] = ['node_6', 'node_2', 'node_3', 'max_pool 3x3', 'sep_conv 3x3']
+  reduc_dag['node_7'] = ['node_7', 'node_3', 'node_4', 'avg_pool 3x3', 'identity']
+  reduc_dag['loose_ends'] = ['node_4', 'node_5', 'node_6', 'node_7']
+
+  return conv_dag, reduc_dag
+
+def PNASNet():
+  conv_dag = OrderedDict()
+  conv_dag['node_1'] = ['node_1', None, None, None, None]
+  conv_dag['node_2'] = ['node_2', None, None, None, None]
+  conv_dag['node_3'] = ['node_3', 'node_2', 'node_2', 'sep_conv 7x7', 'max_pool 3x3']
+  conv_dag['node_4'] = ['node_4', 'node_2', 'node_2', 'sep_conv 5x5', 'sep_conv 3x3']
+  conv_dag['node_5'] = ['node_5', 'node_4', 'node_2', 'sep_conv 3x3', 'max_pool 3x3']
+  conv_dag['node_6'] = ['node_6', 'node_2', 'node_1', 'identity', 'sep_conv 3x3']
+  conv_dag['node_7'] = ['node_7', 'node_1', 'node_1', 'sep_conv 5x5', 'max_pool 3x3']
+  conv_dag['loose_ends'] = ['node_3', 'node_4', 'node_5', 'node_6', 'node_7']
+
+  reduc_dag = OrderedDict(conv_dag)
+  return conv_dag, reduc_dag
