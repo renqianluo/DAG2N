@@ -11,6 +11,18 @@ _BATCH_NORM_EPSILON = 1e-5
 _USE_BIAS = False
 _KERNEL_INITIALIZER=tf.variance_scaling_initializer(mode='fan_out')
 
+def sample_arch(num_layers):
+  arc_seq = []
+  num_layers = num_layers
+  num_branches = 2
+  for layer_id in range(num_layers):
+    for branch_id in range(num_branches):
+      config_id = tf.random_uniform([],minval=0,max_val=16,dtype=tf.int32)
+      config_id = tf.reshape(config_id, [1])
+      arc_seq.append(config_id)
+  arc_seq = tf.concat(arc_seq, axis=0)
+  return arc_seq
+
 def get_channel_dim(x, data_format='INVALID'):
   assert data_format != 'INVALID'
   assert x.shape.ndims == 4
@@ -361,45 +373,66 @@ class NASCell(object):
     # begin processing from node 3
 
     last_inputs, inputs = self._cell_base(last_inputs, inputs)
-
-    h = {}
-    loose_ends = ['node_%d' % i for i in xrange(1, num_nodes+1)]
-    for i in xrange(1, num_nodes+1):
-      name = 'node_%d' % i
-      with tf.variable_scope(name):
-        node = dag[name]
-        assert name == node[0], 'name incompatible with node name'
-        if i == 1:
-          h[name] = last_inputs
-          continue
-        elif i == 2:
-          h[name] = inputs
-          continue
-        previous_node_1, previous_node_2 = node[1], node[2]
-        h1, h2 = h[previous_node_1], h[previous_node_2]
-        if previous_node_1 in loose_ends:
-          loose_ends.remove(previous_node_1)
-        if previous_node_2 in loose_ends:
-          loose_ends.remove(previous_node_2)
-        operation_1, operation_2 = node[3], node[4]
-        with tf.variable_scope('input_1'):
-          is_from_original_input = int(previous_node_1.split('_')[-1]) < 3
-          h1 = self._apply_operation(operation_1, h1, strides, is_from_original_input)
-        with tf.variable_scope('input_2'):
-          is_from_original_input = int(previous_node_2.split('_')[-1]) < 3
-          h2 = self._apply_operation(operation_2, h2, strides, is_from_original_input)
+    layers = [last_inputs, inputs]
+    used = []
+    for i in xrange(num_nodes):
+      prev_layers = tf.statck(num_nodes)
+      with tf.variable_scope('cell_{}'.format(i+1)):
+        with tf.variable_scope('x'):
+          x_id = dag[4*i]
+          x_op = dag[4*i+1]
+          x = prev_layers[x_id, :, :, :, :]
+          x = self._enas_cell(x, i, x_id, x_op, self._filter_size)
+          x_used = tf.one_hot(x_id, depth=num_nodes+2, dtype=tf.int32)
+        with tf.variable_scope('y'):
+          y_id = dag[4*i+2]
+          y_op = dag[4*i+3]
+          y = prev_layers[y_id, :, :, :, :]
+          y = self._enas_cell(y, i, y_id, y_op, self._filter_size)
+          y_used = tf.one_hot(y_id, depth=num_nodes+2, dtype=tf.int32)
         
-        output = h1 + h2
-        h[name] = output
+        output = x + y
+        used.extend([x_used, y_used])
+        layers.append(output)
 
-    if 'loose_ends' in dag:
-      loose_ends = dag['loose_ends']
+    used = tf.add_n(used)
+    indices = tf.where(tf.equal(used, 0))
+    indices = tf.to_int32(indices)
+    indices = tf.reshape(indices, [-1])
+    num_outs = tf.size(indices)
+    out = tf.stack(layers, axis=0)
+    out = tf.gather(out, indices, axis=0)
 
-    with tf.variable_scope('cell_output'):
-      output = self._combine_unused_states(h, loose_ends)
-    
-    return output
+    inp = prev_layers[0]
+    if self.data_format == "channel_last":
+      N = tf.shape(inp)[0]
+      H = tf.shape(inp)[1]
+      W = tf.shape(inp)[2]
+      C = tf.shape(inp)[3]
+      out = tf.transpose(out, [1, 2, 3, 0, 4])
+      out = tf.reshape(out, [N, H, W, num_outs * self._filter_size])
+    elif self.data_format == "channel_first":
+      N = tf.shape(inp)[0]
+      C = tf.shape(inp)[1]
+      H = tf.shape(inp)[2]
+      W = tf.shape(inp)[3]
+      out = tf.transpose(out, [1, 0, 2, 3, 4])
+      out = tf.reshape(out, [N, num_outs * self._filter_size, H, W])
+    else:
+      raise ValueError("Unknown data_format '{0}'".format(self.data_format))
 
+    with tf.variable_scope("final_conv"):
+      w = create_weight("w", [self.num_cells + 2, self._filter_size * self._filter_size])
+      w = tf.gather(w, indices, axis=0)
+      w = tf.reshape(w, [1, 1, num_outs * self._filter_size, self._filter_size])
+      out = tf.nn.relu(out)
+      out = tf.nn.conv2d(out, w, strides=[1, 1, 1, 1], padding="SAME",
+                         data_format=self.data_format)
+      out = batch_norm(out, is_training=True, data_format=self.data_format)
+
+    out = tf.reshape(out, tf.shape(prev_layers[0]))
+
+    return out
 
   def _apply_operation(self, operation, inputs, strides, is_from_original_input):
     filters = self._filter_size
@@ -575,8 +608,8 @@ def build_model(inputs, params, is_training, reuse=False):
   """
   
   filters = params['filters']
-  conv_dag = params['conv_dag']
-  reduc_dag = params['reduc_dag']
+  conv_dag = sample_arch(5)
+  reduc_dag = sample_arch(5)
   N = params['N']
   num_nodes = params['num_nodes']
   if is_training:
