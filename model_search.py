@@ -23,6 +23,19 @@ def sample_arch(num_layers):
   arc_seq = tf.concat(arc_seq, axis=0)
   return arc_seq
 
+
+def create_weight(name, shape, initializer=None, trainable=True, seed=None):
+  if initializer is None:
+    initializer = tf.contrib.keras.initializers.he_normal(seed=seed)
+  return tf.get_variable(name, shape, initializer=initializer, trainable=trainable)
+
+
+def create_bias(name, shape, initializer=None):
+  if initializer is None:
+    initializer = tf.constant_initializer(0.0, dtype=tf.float32)
+  return tf.get_variable(name, shape, initializer=initializer)
+
+
 def get_channel_dim(x, data_format='INVALID'):
   assert data_format != 'INVALID'
   assert x.shape.ndims == 4
@@ -44,206 +57,6 @@ def batch_normalization(inputs, data_format, is_training):
     momentum=_BATCH_NORM_DECAY, epsilon=_BATCH_NORM_EPSILON, center=True,
     scale=True, training=is_training, fused=True)
   return inputs
-
-
-def _pooling(operation, inputs, strides, data_format):
-  pooling_type, pooling_size = _operation_to_pooling_info(operation)
-  if pooling_type == 'avg_pool':
-    inputs = tf.layers.average_pooling2d(
-      inputs=inputs, pool_size=pooling_size, strides=strides,
-      padding='SAME', data_format=data_format)
-  elif pooling_type == 'max_pool':
-    inputs = tf.layers.max_pooling2d(
-      inputs=inputs, pool_size=pooling_size, strides=strides,
-      padding='SAME', data_format=data_format)
-  elif pooling_type == 'min_pool':
-    inputs = -tf.layers.max_pooling2d(
-      inputs=-inputs, pool_size=pooling_size, strides=strides,
-      padding='SAME', data_format=data_format)
-  else:
-    raise NotImplementedError('Unimplemented pooling type: ', pooling_type)
-  return inputs
-
-
-def _separable_conv2d(operation, inputs, filters, strides, data_format, is_training):
-  kernel_size, _ = _operation_to_info(operation)
-
-  inputs = tf.nn.relu(inputs) 
-  with tf.variable_scope('separable_conv_{0}x{0}_{1}'.format(kernel_size, 1)):
-    inputs = tf.layers.separable_conv2d(
-      inputs=inputs, filters=filters, kernel_size=kernel_size, 
-      strides=strides, depth_multiplier=1,
-      padding='SAME', use_bias=_USE_BIAS,
-      depthwise_initializer=_KERNEL_INITIALIZER,
-      pointwise_initializer=_KERNEL_INITIALIZER,
-      data_format=data_format)
-  with tf.variable_scope('bn_sep_{0}x{0}_{1}'.format(kernel_size, 1)):
-    inputs = batch_normalization(inputs, data_format, is_training)
-  strides = 1
-
-  inputs = tf.nn.relu(inputs)
-  with tf.variable_scope('separable_conv_{0}x{0}_{1}'.format(kernel_size, 2)):
-    inputs = tf.layers.separable_conv2d(
-      inputs=inputs, filters=filters, kernel_size=kernel_size, 
-      strides=strides, depth_multiplier=1,
-      padding='SAME', use_bias=_USE_BIAS,
-      depthwise_initializer=_KERNEL_INITIALIZER,
-      pointwise_initializer=_KERNEL_INITIALIZER,
-      data_format=data_format)
-  with tf.variable_scope('bn_sep_{0}x{0}_{1}'.format(kernel_size, 2)):
-    inputs = batch_normalization(inputs, data_format, is_training)
-
-  return inputs
-
-
-def _dil_separable_conv2d(operation, inputs, filters, strides, data_format, is_training):
-  kernel_size, dilation_rate = _operation_to_info(operation)
-
-  if not dilation_rate:
-    dilation_rate = 2
-
-  inputs = tf.nn.relu(inputs) 
-  with tf.variable_scope('dil_separable_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 1)):
-    inputs = tf.layers.separable_conv2d(
-      inputs=inputs, filters=filters, kernel_size=kernel_size, 
-      strides=strides, depth_multiplier=1,
-      padding='SAME', use_bias=_USE_BIAS,
-      dilation_rate=dilation_rate,
-      depthwise_initializer=_KERNEL_INITIALIZER,
-      pointwise_initializer=_KERNEL_INITIALIZER,
-      data_format=data_format)
-  with tf.variable_scope('bn_dil_sep_{0}x{0}_{1}'.format(kernel_size, 1)):
-    inputs = batch_normalization(inputs, data_format, is_training)
-  strides = 1
-
-  inputs = tf.nn.relu(inputs)
-  with tf.variable_scope('dil_separable_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 2)):
-    inputs = tf.layers.separable_conv2d(
-      inputs=inputs, filters=filters, kernel_size=kernel_size, 
-      strides=strides, depth_multiplier=1,
-      padding='SAME', use_bias=_USE_BIAS,
-      dilation_rate=dilation_rate,
-      depthwise_initializer=_KERNEL_INITIALIZER,
-      pointwise_initializer=_KERNEL_INITIALIZER,
-      data_format=data_format)
-  with tf.variable_scope('bn_dil_sep_{0}x{0}_{1}'.format(kernel_size, 2)):
-    inputs = batch_normalization(inputs, data_format, is_training)
-
-  return inputs
-
-
-def _conv2d(operation, inputs, filters, strides, data_format, is_training):
-  kernel_size, _ = _operation_to_info(operation)
-  if isinstance(kernel_size, int):
-    inputs = tf.nn.relu(inputs)
-    with tf.variable_scope('conv_{0}x{0}_{1}'.format(kernel_size, 1)):
-      inputs = tf.layers.conv2d(
-        inputs=inputs, filters=filters, kernel_size=kernel_size, 
-        strides=strides, padding='SAME', use_bias=_USE_BIAS,
-        kernel_initializer=_KERNEL_INITIALIZER,
-        data_format=data_format)
-    with tf.variable_scope('bn_conv_{0}x{0}_{1}'.format(kernel_size, 1)):
-      inputs = batch_normalization(inputs, data_format, is_training)
-    return inputs
-  else:
-    kernel_size1 = kernel_size[0]
-    inputs = tf.nn.relu(inputs) 
-    with tf.variable_scope('conv_{0}x{1}_{2}'.format(kernel_size1[0], kernel_size1[1], 1)):
-      inputs = tf.layers.conv2d(
-        inputs=inputs, filters=filters, kernel_size=kernel_size1, 
-        strides=strides, padding='SAME', use_bias=_USE_BIAS,
-        kernel_initializer=_KERNEL_INITIALIZER,
-        data_format=data_format)
-    with tf.variable_scope('bn_conv_{0}x{1}_{2}'.format(kernel_size1[0], kernel_size1[1], 1)):
-      inputs = batch_normalization(inputs, data_format, is_training)
-    strides = 1
-
-    kernel_size2 = kernel_size[1]
-    inputs = tf.nn.relu(inputs) 
-    with tf.variable_scope('conv_{0}x{1}_{2}'.format(kernel_size2[0], kernel_size2[1], 2)):
-      inputs = tf.layers.conv2d(
-        inputs=inputs, filters=filters, kernel_size=kernel_size2, 
-        strides=strides, padding='SAME', use_bias=_USE_BIAS,
-        kernel_initializer=_KERNEL_INITIALIZER,
-        data_format=data_format)
-    with tf.variable_scope('bn_conv_{0}x{1}_{2}'.format(kernel_size2[0], kernel_size2[1], 2)):
-      inputs = batch_normalization(inputs, data_format, is_training)
-    return inputs
-
-
-def _dil_conv2d(operation, inputs, filters, strides, data_format, is_training):
-  kernel_size, dilation_rate = _operation_to_info(operation)
-  inputs = tf.nn.relu(inputs) 
-  with tf.variable_scope('dil_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 1)):
-    inputs = tf.layers.conv2d(
-      inputs=inputs, filters=filters, kernel_size=kernel_size, 
-      strides=strides, padding='SAME', use_bias=_USE_BIAS,
-      dilation_rate=dilation_rate,
-      kernel_initializer=_KERNEL_INITIALIZER,
-      data_format=data_format)
-  with tf.variable_scope('bn_dil_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 1)):
-    inputs = batch_normalization(inputs, data_format, is_training)
-  
-  return inputs
-
-
-def _operation_to_filter_shape(operation):
-  if '+' in operation:
-    filter_shapes = operation.split('+')
-    filter_shape = []
-    for fs in filter_shapes:
-      filter_height_width = fs.split('x')
-      filter_height = int(filter_height_width[0])
-      filter_width = int(filter_height_width[1])
-      filter_shape.append((filter_height, filter_width))
-    return filter_shape
-  else:
-    filter_height_width = operation.split('x')
-    filter_shape = int(filter_height_width[0])
-    assert filter_shape == int(
-        filter_height_width[1]), 'Rectangular filters not supported.'
-    return filter_shape
-
-
-def _operation_to_num_layers(operation):
-  splitted_operation = operation.split(' ')
-  if 'x' in splitted_operation[-1]:
-    return 1
-  return int(splitted_operation[-1])
-
-
-def _operation_to_dilation_rate(operation):
-  return int(operation)
-
-
-def _operation_to_info(operation):
-  operation = operation.split(' ')
-  filter_shape = _operation_to_filter_shape(operation[1])
-  if len(operation) == 3:
-    dilation_rate = _operation_to_dilation_rate(operation[2])
-  else:
-    dilation_rate = None
-  return filter_shape, dilation_rate
-
-
-def _operation_to_pooling_type(operation):
-  splitted_operation = operation.split(' ')
-  return splitted_operation[0]
-
-
-def _operation_to_pooling_shape(operation):
-  splitted_operation = operation.split(' ')
-  shape = splitted_operation[-1]
-  assert 'x' in shape
-  filter_height, filter_width = shape.split('x')
-  assert filter_height == filter_width
-  return int(filter_height)
-
-
-def _operation_to_pooling_info(operation):
-  pooling_type = _operation_to_pooling_type(operation)
-  pooling_shape = _operation_to_pooling_shape(operation)
-  return pooling_type, pooling_shape
 
 
 def factorized_reduction(inputs, filters, strides, data_format, is_training):
@@ -290,17 +103,6 @@ def factorized_reduction(inputs, filters, strides, data_format, is_training):
   return inputs
 
 
-def drop_path(inputs, keep_prob, is_training=True):
-  if is_training:
-    batch_size = tf.shape(inputs)[0]
-    noise_shape = [batch_size, 1, 1, 1]
-    random_tensor = keep_prob
-    random_tensor += tf.random_uniform(noise_shape, dtype=tf.float32)
-    binary_tensor = tf.floor(random_tensor)
-    inputs = tf.div(inputs, keep_prob) * binary_tensor
-  return inputs
-
-
 class NASCell(object):
   def __init__(self, filters, dag, num_nodes, drop_path_keep_prob, num_cells,
     total_steps, data_format, is_training):
@@ -339,6 +141,185 @@ class NASCell(object):
         prev_layer = batch_normalization(prev_layer, data_format, is_training)
     return prev_layer
 
+
+  def _nas_conv(self, x, curr_cell, prev_cell, filter_size, out_filters, stack_conv=1):
+    with tf.variable_scope("conv_{0}x{0}".format(filter_size)):
+      num_possible_inputs = curr_cell + 2
+      for conv_id in range(stack_conv):
+        with tf.variable_scope("stack_{0}".format(conv_id)):
+          # create params and pick the correct path
+          inp_c = get_channel_dim(x)
+          w = create_weight(
+            "w", [num_possible_inputs, filter_size * filter_size * inp_c * out_filters],
+            initializer=_KERNEL_INITIALIZER)
+          w = w[prev_cell, :]
+          w = tf.reshape(
+            w, [filter_size, filter_size, inp_c, out_filters])
+
+          with tf.variable_scope("bn"):
+            zero_init = tf.initializers.zeros(dtype=tf.float32)
+            one_init = tf.initializers.ones(dtype=tf.float32)
+            offset = create_weight(
+              "offset", [num_possible_inputs, out_filters],
+              initializer=zero_init)
+            scale = create_weight(
+              "scale", [num_possible_inputs, out_filters],
+              initializer=one_init)
+            offset = offset[prev_cell]
+            scale = scale[prev_cell]
+
+          # the computations
+          x = tf.nn.relu(x)
+          x = tf.nn.conv2d(
+            x,
+            filter=w,
+            strides=[1, 1, 1, 1], padding="SAME",
+            data_format=self._data_format)
+          x, _, _ = tf.nn.fused_batch_norm(
+            x, scale, offset, epsilon=1e-5, data_format=self._data_format,
+            is_training=True)
+    return x
+
+
+  def _nas_conv(self, x, curr_cell, prev_cell, filter_size, out_filters, stack_conv=2):
+    with tf.variable_scope("sep_conv_{0}x{0}".format(filter_size)):
+      num_possible_inputs = curr_cell + 2
+      for conv_id in range(stack_conv):
+        with tf.variable_scope("stack_{0}".format(conv_id)):
+          # create params and pick the correct path
+          inp_c = get_channel_dim(x)
+          w_depthwise = create_weight(
+            "w_depth", [num_possible_inputs, filter_size * filter_size * inp_c],
+            initializer=_KERNEL_INITIALIZER)
+          w_depthwise = w_depthwise[prev_cell, :]
+          w_depthwise = tf.reshape(
+            w_depthwise, [filter_size, filter_size, inp_c, 1])
+
+          w_pointwise = create_weight(
+            "w_point", [num_possible_inputs, inp_c * out_filters],
+            initializer=_KERNEL_INITIALIZER)
+          w_pointwise = w_pointwise[prev_cell, :]
+          w_pointwise = tf.reshape(w_pointwise, [1, 1, inp_c, out_filters])
+
+          with tf.variable_scope("bn"):
+            zero_init = tf.initializers.zeros(dtype=tf.float32)
+            one_init = tf.initializers.ones(dtype=tf.float32)
+            offset = create_weight(
+              "offset", [num_possible_inputs, out_filters],
+              initializer=zero_init)
+            scale = create_weight(
+              "scale", [num_possible_inputs, out_filters],
+              initializer=one_init)
+            offset = offset[prev_cell]
+            scale = scale[prev_cell]
+
+          # the computations
+          x = tf.nn.relu(x)
+          x = tf.nn.separable_conv2d(
+            x,
+            depthwise_filter=w_depthwise,
+            pointwise_filter=w_pointwise,
+            strides=[1, 1, 1, 1], padding="SAME",
+            data_format=self.data_format)
+          x, _, _ = tf.nn.fused_batch_norm(
+            x, scale, offset, epsilon=1e-5, data_format=self.data_format,
+            is_training=True)
+    return x
+
+  def _nas_cell(self, x, curr_cell, prev_cell, op_id, out_filters):
+    num_possible_inputs = curr_cell + 1
+    with tf.variable_scope('max_pool_2x2'):
+      max_pool_2 = tf.layers.max_pooling2d(
+        x, [2, 2], [1, 1], "SAME", data_format=self._data_format)
+      max_pool_c = get_channel_dim(max_pool_2, self._data_format)
+      if max_pool_c != out_filters:
+        with tf.variable_scope("conv"):
+          w = create_weight(
+            "w", [num_possible_inputs, max_pool_c * out_filters],
+            initializer=_KERNEL_INITIALIZER)
+          w = w[prev_cell]
+          w = tf.reshape(w, [1, 1, max_pool_c, out_filters])
+          max_pool_2 = tf.nn.relu(max_pool_2)
+          max_pool_2 = tf.nn.conv2d(max_pool_2, w, strides=[1, 1, 1, 1],
+                                  padding="SAME", data_format=self._data_format)
+          max_pool_2 = batch_normalization(max_pool_2, is_training=True,
+                                data_format=self._data_format)
+
+    with tf.variable_scope('max_pool_3x3'):
+      max_pool_3 = tf.layers.max_pooling2d(
+        x, [3, 3], [1, 1], "SAME", data_format=self._data_format)
+      max_pool_c = get_channel_dim(max_pool_3, self._data_format)
+      if max_pool_c != out_filters:
+        with tf.variable_scope("conv"):
+          w = create_weight(
+            "w", [num_possible_inputs, max_pool_c * out_filters],
+            initializer=_KERNEL_INITIALIZER)
+          w = w[prev_cell]
+          w = tf.reshape(w, [1, 1, max_pool_c, out_filters])
+          max_pool_3 = tf.nn.relu(max_pool_3)
+          max_pool_3 = tf.nn.conv2d(max_pool_3, w, strides=[1, 1, 1, 1],
+                                    padding="SAME", data_format=self._data_format)
+          max_pool_3 = batch_normalization(max_pool_3, is_training=True,
+                                           data_format=self._data_format)
+    with tf.variable_scope('avg_pool_2x2'):
+      avg_pool_2 = tf.layers.average_pooling2d(
+        x, [2, 2], [1, 1], "SAME", data_format=self._data_format)
+      avg_pool_c = get_channel_dim(avg_pool_2, self._data_format)
+      if avg_pool_c != out_filters:
+        with tf.variable_scope("conv"):
+          w = create_weight(
+            "w", [num_possible_inputs, avg_pool_c * out_filters],
+            initializer=_KERNEL_INITIALIZER)
+          w = w[prev_cell]
+          w = tf.reshape(w, [1, 1, avg_pool_c, out_filters])
+          avg_pool_2 = tf.nn.relu(avg_pool_2)
+          avg_pool_2 = tf.nn.conv2d(avg_pool_2, w, strides=[1, 1, 1, 1],
+                                    padding="SAME", data_format=self._data_format)
+          avg_pool_2 = batch_normalization(avg_pool_2, is_training=True,
+                                           data_format=self._data_format)
+
+    with tf.variable_scope('avg_pool_3x3'):
+      avg_pool_3 = tf.layers.average_pooling2d(
+        x, [3, 3], [1, 1], "SAME", data_format=self._data_format)
+      avg_pool_c = get_channel_dim(avg_pool_3, self._data_format)
+      if avg_pool_c != out_filters:
+        with tf.variable_scope("conv"):
+          w = create_weight(
+            "w", [num_possible_inputs, avg_pool_c * out_filters],
+            initializer=_KERNEL_INITIALIZER)
+          w = w[prev_cell]
+          w = tf.reshape(w, [1, 1, avg_pool_c, out_filters])
+          avg_pool_3 = tf.nn.relu(avg_pool_3)
+          avg_pool_3 = tf.nn.conv2d(avg_pool_3, w, strides=[1, 1, 1, 1],
+                                    padding="SAME", data_format=self._data_format)
+          avg_pool_3 = batch_normalization(avg_pool_3, is_training=True,
+                                           data_format=self._data_format)
+
+    x_c = get_channel_dim(x)
+    if x_c != out_filters:
+      with tf.variable_scope("x_conv"):
+        w = create_weight("w", [num_possible_inputs, x_c * out_filters],
+            initializer=_KERNEL_INITIALIZER)
+        w = w[prev_cell]
+        w = tf.reshape(w, [1, 1, x_c, out_filters])
+        x = tf.nn.relu(x)
+        x = tf.nn.conv2d(x, w, strides=[1, 1, 1, 1], padding="SAME",
+                         data_format=self.data_format)
+        x = batch_normalization(x, is_training=True, data_format=self.data_format)
+
+    out = [
+      tf.identity(x),
+      self._nas_conv(x, curr_cell, prev_cell, 1, out_filters),
+      self._nas_conv(x, curr_cell, prev_cell, 2, out_filters),
+      self._nas_conv(x, curr_cell, prev_cell, 3, out_filters),
+      self._nas_sep_conv(x, curr_cell, prev_cell, 1, out_filters),
+      self._nas_sep_conv(x, curr_cell, prev_cell, 2, out_filters),
+      self._nas_sep_conv(x, curr_cell, prev_cell, 3, out_filters),
+      max_pool_2,
+      max_pool_3,
+      avg_pool_2,
+      avg_pool_3
+    ]
 
   def _cell_base(self, last_inputs, inputs):
     filters = self._filter_size
@@ -382,13 +363,13 @@ class NASCell(object):
           x_id = dag[4*i]
           x_op = dag[4*i+1]
           x = prev_layers[x_id, :, :, :, :]
-          x = self._enas_cell(x, i, x_id, x_op, self._filter_size)
+          x = self._nas_cell(x, i, x_id, x_op, self._filter_size)
           x_used = tf.one_hot(x_id, depth=num_nodes+2, dtype=tf.int32)
         with tf.variable_scope('y'):
           y_id = dag[4*i+2]
           y_op = dag[4*i+3]
           y = prev_layers[y_id, :, :, :, :]
-          y = self._enas_cell(y, i, y_id, y_op, self._filter_size)
+          y = self._nas_cell(y, i, y_id, y_op, self._filter_size)
           y_used = tf.one_hot(y_id, depth=num_nodes+2, dtype=tf.int32)
         
         output = x + y
@@ -404,14 +385,14 @@ class NASCell(object):
     out = tf.gather(out, indices, axis=0)
 
     inp = prev_layers[0]
-    if self.data_format == "channel_last":
+    if self._data_format == "channel_last":
       N = tf.shape(inp)[0]
       H = tf.shape(inp)[1]
       W = tf.shape(inp)[2]
       C = tf.shape(inp)[3]
       out = tf.transpose(out, [1, 2, 3, 0, 4])
       out = tf.reshape(out, [N, H, W, num_outs * self._filter_size])
-    elif self.data_format == "channel_first":
+    elif self._data_format == "channel_first":
       N = tf.shape(inp)[0]
       C = tf.shape(inp)[1]
       H = tf.shape(inp)[2]
@@ -428,70 +409,11 @@ class NASCell(object):
       out = tf.nn.relu(out)
       out = tf.nn.conv2d(out, w, strides=[1, 1, 1, 1], padding="SAME",
                          data_format=self.data_format)
-      out = batch_norm(out, is_training=True, data_format=self.data_format)
+      out = batch_normalization(out, is_training=True, data_format=self.data_format)
 
     out = tf.reshape(out, tf.shape(prev_layers[0]))
 
     return out
-
-  def _apply_operation(self, operation, inputs, strides, is_from_original_input):
-    filters = self._filter_size
-    data_format = self._data_format
-    is_training = self._is_training
-
-    if strides > 1 and not is_from_original_input:
-      strides = 1
-    input_filters = get_channel_dim(inputs, data_format)
-    if 'dil_sep_conv' in operation:
-      inputs = _dil_separable_conv2d(operation, inputs, filters, strides, data_format, is_training)
-    elif 'dil_conv' in operation:
-      #dilation > 1 is not compatible with strides > 1, so set strides to 1, and use a 1x1 conv with expected strdies
-      inputs = _dil_conv2d(operation, inputs, filters, 1, data_format, is_training)
-      if strides > 1:
-        inputs = tf.nn.relu(inputs)
-        with tf.variable_scope('1x1'):
-          inputs = tf.layers.conv2d(
-            inputs=inputs, filters=filters, kernel_size=1, 
-            strides=strides, padding='SAME', use_bias=_USE_BIAS,
-            kernel_initializer=_KERNEL_INITIALIZER,
-            data_format=data_format,)
-        with tf.variable_scope('bn'):
-          inputs = batch_normalization(inputs, data_format, is_training)
-    elif 'sep_conv' in operation:
-      inputs = _separable_conv2d(operation, inputs, filters, strides, data_format, is_training)
-    elif 'conv' in operation:
-      inputs = _conv2d(operation, inputs, filters, strides, data_format, is_training)
-    elif 'identity' in operation:
-      if strides > 1 or (input_filters != filters):
-        inputs = tf.nn.relu(inputs)
-        with tf.variable_scope('1x1'):
-          inputs = tf.layers.conv2d(
-            inputs=inputs, filters=filters, kernel_size=1, 
-            strides=strides, padding='SAME', use_bias=_USE_BIAS,
-            kernel_initializer=_KERNEL_INITIALIZER,
-            data_format=data_format)
-        with tf.variable_scope('bn'):
-          inputs = batch_normalization(inputs, data_format, is_training)
-    elif 'pool' in operation:
-      inputs = _pooling(operation, inputs, strides, data_format)
-      if input_filters != filters:
-        inputs = tf.nn.relu(inputs)
-        with tf.variable_scope('1x1'):
-          inputs = tf.layers.conv2d(
-            inputs=inputs, filters=filters, kernel_size=1, 
-            strides=1, padding='SAME', use_bias=_USE_BIAS,
-            kernel_initializer=_KERNEL_INITIALIZER,
-            data_format=data_format)
-        with tf.variable_scope('bn'):
-          inputs = batch_normalization(inputs, data_format, is_training)
-    else:
-      raise ValueError('Unimplemented operation', operation)
-
-    if operation != 'identity':
-      inputs = self._apply_drop_path(inputs, is_training)
-
-    return inputs
-
 
   def _combine_unused_states(self, h, loose_nodes):
     data_format = self._data_format
@@ -516,37 +438,6 @@ class NASCell(object):
 
     output = tf.concat([h[name] for name in loose_nodes], axis=get_channel_index(data_format))
     return output
-
-  def _apply_drop_path(self, inputs, is_training, current_step=None, use_summaries=False, drop_connect_version='v3'):
-    drop_path_keep_prob = self._drop_path_keep_prob
-    if drop_path_keep_prob < 1.0:
-      assert drop_connect_version in ['v1', 'v2', 'v3']
-      if drop_connect_version in ['v2', 'v3']:
-        # Scale keep prob by layer number
-        assert self._cell_num != -1
-        num_cells = self._num_cells
-        layer_ratio = (self._cell_num + 1) / float(num_cells)
-        if use_summaries:
-          with tf.device('/cpu:0'):
-            tf.summary.scalar('layer_ratio', layer_ratio)
-        drop_path_keep_prob = 1 - layer_ratio * (1 - drop_path_keep_prob)
-      if drop_connect_version in ['v1', 'v3']:
-        # Decrease the keep probability over time
-        if not current_step:
-          current_step = tf.cast(tf.train.get_or_create_global_step(),
-                                   tf.float32)
-        drop_path_burn_in_steps = self._total_steps
-        current_ratio = current_step / drop_path_burn_in_steps
-        current_ratio = tf.minimum(1.0, current_ratio)
-        if use_summaries:
-          with tf.device('/cpu:0'):
-            tf.summary.scalar('current_ratio', current_ratio)
-        drop_path_keep_prob = (1 - current_ratio * (1 - drop_path_keep_prob))
-      if use_summaries:
-        with tf.device('/cpu:0'):
-          tf.summary.scalar('drop_path_keep_prob', drop_path_keep_prob)
-      inputs = drop_path(inputs, drop_path_keep_prob, is_training)
-    return inputs
 
 
 def _build_aux_head(aux_net, num_classes, params, data_format, is_training):
@@ -669,12 +560,14 @@ def build_model(inputs, params, is_training, reuse=False):
       if cell_num in reduction_layers:
         filter_scaling *= 2
         with tf.variable_scope('reduction_cell_%d' % (reduction_layers.index(cell_num)+1)):
+          inputs = factorized_reduction(inputs, filters * filter_scaling, 2, data_format, is_training)
+          layers = [layers[-1], inputs]
           inputs = reduction_cell(layers[-1], filter_scaling, 2, layers[-2], true_cell_num)
         layers.append(inputs)
         true_cell_num += 1
       with tf.variable_scope('convolution_cell_%d' % (cell_num+1)):
         inputs = convolution_cell(layers[-1], filter_scaling, strides, layers[-2], true_cell_num)
-      layers.append(inputs)
+      layers = [layers[-1], inputs]
       true_cell_num += 1
       if use_aux_head and aux_head_ceill_index == cell_num and num_classes and is_training:
         aux_logits = _build_aux_head(inputs, num_classes, params, data_format, is_training)
