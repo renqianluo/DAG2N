@@ -11,14 +11,13 @@ _BATCH_NORM_EPSILON = 1e-5
 _USE_BIAS = False
 _KERNEL_INITIALIZER=tf.variance_scaling_initializer(mode='fan_out')
 
-def sample_arch(num_layers):
-  arc_seq = []
-  num_layers = num_layers
-  num_branches = 2
-  for layer_id in range(num_layers):
-    for branch_id in range(num_branches):
-      config_id = tf.random_uniform([],minval=0,max_val=16,dtype=tf.int32)
-      config_id = tf.reshape(config_id, [1])
+def sample_arch(num_cells):
+  arc_seq = tf.TensorArray(tf.int32, size=num_cells * 4)
+  for cell_id in range(num_cells):
+    for branch_id in range(2):
+      index = tf.random_uniforn([1], minval=0, max_val=cell_id+2)
+      arc_seq.append(index)
+      config_id = tf.random_uniform([1],minval=0,max_val=11,dtype=tf.int32)
       arc_seq.append(config_id)
   arc_seq = tf.concat(arc_seq, axis=0)
   return arc_seq
