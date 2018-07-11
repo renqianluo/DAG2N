@@ -12,12 +12,13 @@ _USE_BIAS = False
 _KERNEL_INITIALIZER=tf.variance_scaling_initializer(mode='fan_out')
 
 def sample_arch(num_cells):
-  arc_seq = tf.TensorArray(tf.int32, size=num_cells * 4)
+  #arc_seq = tf.TensorArray(tf.int32, size=num_cells * 4)
+  arc_seq = []
   for cell_id in range(num_cells):
     for branch_id in range(2):
-      index = tf.random_uniforn([1], minval=0, max_val=cell_id+1)
+      index = tf.random_uniform([1], minval=0, maxval=cell_id+1, dtype=tf.int32)
       arc_seq.append(index)
-      config_id = tf.random_uniform([1],minval=0,max_val=11,dtype=tf.int32)
+      config_id = tf.random_uniform([1], minval=0, maxval=11, dtype=tf.int32)
       arc_seq.append(config_id)
   arc_seq = tf.concat(arc_seq, axis=0)
   return arc_seq
@@ -147,7 +148,7 @@ class NASCell(object):
       for conv_id in range(stack_conv):
         with tf.variable_scope("stack_{0}".format(conv_id)):
           # create params and pick the correct path
-          inp_c = get_channel_dim(x)
+          inp_c = get_channel_dim(x, self._data_format)
           w = create_weight(
             "w", [num_possible_inputs, filter_size * filter_size * inp_c * out_filters],
             initializer=_KERNEL_INITIALIZER)
@@ -173,20 +174,18 @@ class NASCell(object):
             x,
             filter=w,
             strides=[1, 1, 1, 1], padding="SAME",
-            data_format=self._data_format)
-          x, _, _ = tf.nn.fused_batch_norm(
-            x, scale, offset, epsilon=1e-5, data_format=self._data_format,
-            is_training=True)
+            data_format='NCHW' if self._data_format=='channels_first' else 'NHWC')
+          x = batch_normalization(x, self._data_format, self._is_training)
     return x
 
 
-  def _nas_conv(self, x, curr_cell, prev_cell, filter_size, out_filters, stack_conv=2):
+  def _nas_sep_conv(self, x, curr_cell, prev_cell, filter_size, out_filters, stack_conv=2):
     with tf.variable_scope("sep_conv_{0}x{0}".format(filter_size)):
       num_possible_inputs = curr_cell + 2
       for conv_id in range(stack_conv):
         with tf.variable_scope("stack_{0}".format(conv_id)):
           # create params and pick the correct path
-          inp_c = get_channel_dim(x)
+          inp_c = get_channel_dim(x, self._data_format)
           w_depthwise = create_weight(
             "w_depth", [num_possible_inputs, filter_size * filter_size * inp_c],
             initializer=_KERNEL_INITIALIZER)
@@ -219,10 +218,8 @@ class NASCell(object):
             depthwise_filter=w_depthwise,
             pointwise_filter=w_pointwise,
             strides=[1, 1, 1, 1], padding="SAME",
-            data_format=self.data_format)
-          x, _, _ = tf.nn.fused_batch_norm(
-            x, scale, offset, epsilon=1e-5, data_format=self.data_format,
-            is_training=True)
+            data_format='NCHW' if self._data_format=='channels_first' else 'NHWC')
+          x = batch_normalization(x, self._data_format, self._is_training)
     return x
 
   def _nas_cell(self, x, curr_cell, prev_cell, op_id, out_filters):
@@ -239,8 +236,8 @@ class NASCell(object):
           w = w[prev_cell]
           w = tf.reshape(w, [1, 1, max_pool_c, out_filters])
           max_pool_2 = tf.nn.relu(max_pool_2)
-          max_pool_2 = tf.nn.conv2d(max_pool_2, w, strides=[1, 1, 1, 1],
-                                  padding="SAME", data_format=self._data_format)
+          max_pool_2 = tf.nn.conv2d(max_pool_2, w, strides=[1, 1, 1, 1], padding="SAME",
+                                  data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
           max_pool_2 = batch_normalization(max_pool_2, is_training=True,
                                 data_format=self._data_format)
 
@@ -256,8 +253,8 @@ class NASCell(object):
           w = w[prev_cell]
           w = tf.reshape(w, [1, 1, max_pool_c, out_filters])
           max_pool_3 = tf.nn.relu(max_pool_3)
-          max_pool_3 = tf.nn.conv2d(max_pool_3, w, strides=[1, 1, 1, 1],
-                                    padding="SAME", data_format=self._data_format)
+          max_pool_3 = tf.nn.conv2d(max_pool_3, w, strides=[1, 1, 1, 1], padding="SAME",
+                                    data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
           max_pool_3 = batch_normalization(max_pool_3, is_training=True,
                                            data_format=self._data_format)
     with tf.variable_scope('avg_pool_2x2'):
@@ -272,8 +269,8 @@ class NASCell(object):
           w = w[prev_cell]
           w = tf.reshape(w, [1, 1, avg_pool_c, out_filters])
           avg_pool_2 = tf.nn.relu(avg_pool_2)
-          avg_pool_2 = tf.nn.conv2d(avg_pool_2, w, strides=[1, 1, 1, 1],
-                                    padding="SAME", data_format=self._data_format)
+          avg_pool_2 = tf.nn.conv2d(avg_pool_2, w, strides=[1, 1, 1, 1], padding="SAME",
+                                    data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
           avg_pool_2 = batch_normalization(avg_pool_2, is_training=True,
                                            data_format=self._data_format)
 
@@ -289,12 +286,12 @@ class NASCell(object):
           w = w[prev_cell]
           w = tf.reshape(w, [1, 1, avg_pool_c, out_filters])
           avg_pool_3 = tf.nn.relu(avg_pool_3)
-          avg_pool_3 = tf.nn.conv2d(avg_pool_3, w, strides=[1, 1, 1, 1],
-                                    padding="SAME", data_format=self._data_format)
+          avg_pool_3 = tf.nn.conv2d(avg_pool_3, w, strides=[1, 1, 1, 1], padding="SAME",
+                                    data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
           avg_pool_3 = batch_normalization(avg_pool_3, is_training=True,
                                            data_format=self._data_format)
 
-    x_c = get_channel_dim(x)
+    x_c = get_channel_dim(x, self._data_format)
     if x_c != out_filters:
       with tf.variable_scope("x_conv"):
         w = create_weight("w", [num_possible_inputs, x_c * out_filters],
@@ -303,11 +300,11 @@ class NASCell(object):
         w = tf.reshape(w, [1, 1, x_c, out_filters])
         x = tf.nn.relu(x)
         x = tf.nn.conv2d(x, w, strides=[1, 1, 1, 1], padding="SAME",
-                         data_format=self.data_format)
-        x = batch_normalization(x, is_training=True, data_format=self.data_format)
+                         data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
+        x = batch_normalization(x, is_training=True, data_format=self._data_format)
 
     out = [
-      tf.identity(x),
+      x,
       self._nas_conv(x, curr_cell, prev_cell, 1, out_filters),
       self._nas_conv(x, curr_cell, prev_cell, 2, out_filters),
       self._nas_conv(x, curr_cell, prev_cell, 3, out_filters),
@@ -320,12 +317,18 @@ class NASCell(object):
       avg_pool_3
     ]
 
+    out = tf.stack(out, axis=0)
+    out = out[op_id, :, :, :, :]
+    return out
+
   def _cell_base(self, last_inputs, inputs):
     filters = self._filter_size
     data_format = self._data_format
     is_training = self._is_training
 
     with tf.variable_scope('transforme_last_inputs'):
+      if last_inputs is None:
+        last_inputs = inputs
       last_inputs = self._reduce_prev_layer(last_inputs, inputs)
     with tf.variable_scope('transforme_inputs'):
       inputs = tf.nn.relu(inputs)
@@ -356,7 +359,7 @@ class NASCell(object):
     layers = [last_inputs, inputs]
     used = []
     for i in xrange(num_nodes):
-      prev_layers = tf.statck(num_nodes)
+      prev_layers = tf.statck(layers, axis=0)
       with tf.variable_scope('cell_{}'.format(i+1)):
         with tf.variable_scope('x'):
           x_id = dag[4*i]
@@ -384,14 +387,14 @@ class NASCell(object):
     out = tf.gather(out, indices, axis=0)
 
     inp = prev_layers[0]
-    if self._data_format == "channel_last":
+    if self._data_format == "channels_last":
       N = tf.shape(inp)[0]
       H = tf.shape(inp)[1]
       W = tf.shape(inp)[2]
       C = tf.shape(inp)[3]
       out = tf.transpose(out, [1, 2, 3, 0, 4])
       out = tf.reshape(out, [N, H, W, num_outs * self._filter_size])
-    elif self._data_format == "channel_first":
+    elif self._data_format == "channels_first":
       N = tf.shape(inp)[0]
       C = tf.shape(inp)[1]
       H = tf.shape(inp)[2]
@@ -399,7 +402,7 @@ class NASCell(object):
       out = tf.transpose(out, [1, 0, 2, 3, 4])
       out = tf.reshape(out, [N, num_outs * self._filter_size, H, W])
     else:
-      raise ValueError("Unknown data_format '{0}'".format(self.data_format))
+      raise ValueError("Unknown data_format '{0}'".format(self._data_format))
 
     with tf.variable_scope("final_conv"):
       w = create_weight("w", [self.num_cells + 2, self._filter_size * self._filter_size])
@@ -407,36 +410,12 @@ class NASCell(object):
       w = tf.reshape(w, [1, 1, num_outs * self._filter_size, self._filter_size])
       out = tf.nn.relu(out)
       out = tf.nn.conv2d(out, w, strides=[1, 1, 1, 1], padding="SAME",
-                         data_format=self.data_format)
-      out = batch_normalization(out, is_training=True, data_format=self.data_format)
+                         data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
+      out = batch_normalization(out, is_training=True, data_format=self._data_format)
 
     out = tf.reshape(out, tf.shape(prev_layers[0]))
 
     return out
-
-  def _combine_unused_states(self, h, loose_nodes):
-    data_format = self._data_format
-    is_training = self._is_training
-    filters = self._filter_size
-
-    out_height = min([int(h[name].shape[2]) for name in loose_nodes])
-
-    for i in range(1, self._num_nodes+1):
-      node_name = 'node_%d'%i
-      curr_height = int(h[node_name].shape[2])
-      curr_filters = get_channel_dim(h[node_name], data_format)
-
-      # Determine if a reduction should be applied to make the number of filters match.
-      should_reduce = filters != curr_filters
-      should_reduce = (out_height != curr_height) or should_reduce
-      should_reduce = should_reduce and (node_name in loose_nodes)
-      if should_reduce:
-        strides = 2 if out_height != curr_height else 1
-        with tf.variable_scope('reduction_{}'.format(i)):
-          h[node_name] = factorized_reduction(h[node_name], filters, strides, data_format, is_training)
-
-    output = tf.concat([h[name] for name in loose_nodes], axis=get_channel_index(data_format))
-    return output
 
 
 def _build_aux_head(aux_net, num_classes, params, data_format, is_training):

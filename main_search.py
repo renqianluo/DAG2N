@@ -47,7 +47,7 @@ parser.add_argument('--data_dir', type=str, default='/tmp/cifar10_data',
 parser.add_argument('--model_dir', type=str, default='/tmp/cifar10_model',
                     help='The directory where the model will be stored.')
 
-parser.add_argument('--num_nodes', type=int, default=7,
+parser.add_argument('--num_nodes', type=int, default=5,
                     help='The number of nodes in a cell.')
 
 parser.add_argument('--N', type=int, default=6,
