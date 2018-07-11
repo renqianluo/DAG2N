@@ -15,7 +15,7 @@ def sample_arch(num_cells):
   arc_seq = tf.TensorArray(tf.int32, size=num_cells * 4)
   for cell_id in range(num_cells):
     for branch_id in range(2):
-      index = tf.random_uniforn([1], minval=0, max_val=cell_id+2)
+      index = tf.random_uniforn([1], minval=0, max_val=cell_id+1)
       arc_seq.append(index)
       config_id = tf.random_uniform([1],minval=0,max_val=11,dtype=tf.int32)
       arc_seq.append(config_id)
@@ -498,8 +498,9 @@ def build_model(inputs, params, is_training, reuse=False):
   """
   
   filters = params['filters']
-  conv_dag = sample_arch(5)
-  reduc_dag = sample_arch(5)
+  if params['conv_dag'] is None or params['reduc_dag'] is None:
+    conv_dag = sample_arch(5)
+    reduc_dag = sample_arch(5)
   N = params['N']
   num_nodes = params['num_nodes']
   if is_training:

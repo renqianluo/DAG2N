@@ -78,10 +78,10 @@ parser.add_argument('--batch_size', type=int, default=128,
                     help='The number of images per batch.')
 
 parser.add_argument('--dag', type=str, default=None,
-                    help='Default dag to run.')
+                    help='Dag to run. If None for default, then randomly sampled arch is used.')
 
 parser.add_argument('--hparams', type=str, default=None,
-                    help='hparams file. All the params will be overrided by this file.')
+                    help='hparams file.')
 
 parser.add_argument('--split_train_valid', action='store_true', default=False,
                     help='Split training data to train set and valid set.')
@@ -536,12 +536,23 @@ def train(params):
           break
 
 
-def build_dag(dag_name_or_path):
-  try:
-    conv_dag, reduc_dag = eval('dag.{}()'.format(dag_name_or_path))
-  except:
-    conv_dag, reduc_dag = None, None
-
+def build_dag(arch):
+  if arch is None:
+    return None, None
+  # assume arch is the format [idex, op ...] where index is in [1,6] and op in [7, 17]
+  # need convert index to [0, 5] and op to [0, 10]
+  def _parse(s):
+    res = []
+    l = len(s)
+    for i in range(l):
+      if i % 2 == 0:
+        res.append(s[i]-1)
+      else:
+        res.append(s[i]-7)
+  arch = list(map(int, arch.strip().split()))
+  length = len(arch)
+  conv_dag = _parse(s[:length//2])
+  reduc_dag = _parse(s[length//2:])
   return conv_dag, reduc_dag
 
 
@@ -563,10 +574,7 @@ def get_params():
     with open(os.path.join(FLAGS.hparams), 'r') as f:
       hparams = json.load(f)
       params.update(hparams)
- 
-  if params['conv_dag'] is None or params['reduc_dag'] is None:
-    raise ValueError('You muse specify a registered model name or provide a model in the hparams.')
-  
+
   return params 
 
 
