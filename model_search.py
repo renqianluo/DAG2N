@@ -359,7 +359,7 @@ class NASCell(object):
     layers = [last_inputs, inputs]
     used = []
     for i in xrange(num_nodes):
-      prev_layers = tf.statck(layers, axis=0)
+      prev_layers = tf.stack(layers, axis=0)
       with tf.variable_scope('cell_{}'.format(i+1)):
         with tf.variable_scope('x'):
           x_id = dag[4*i]
@@ -405,7 +405,7 @@ class NASCell(object):
       raise ValueError("Unknown data_format '{0}'".format(self._data_format))
 
     with tf.variable_scope("final_conv"):
-      w = create_weight("w", [self.num_cells + 2, self._filter_size * self._filter_size])
+      w = create_weight("w", [self._num_nodes + 2, self._filter_size * self._filter_size])
       w = tf.gather(w, indices, axis=0)
       w = tf.reshape(w, [1, 1, num_outs * self._filter_size, self._filter_size])
       out = tf.nn.relu(out)
@@ -477,11 +477,11 @@ def build_model(inputs, params, is_training, reuse=False):
   """
   
   filters = params['filters']
-  if params['conv_dag'] is None or params['reduc_dag'] is None:
-    conv_dag = sample_arch(5)
-    reduc_dag = sample_arch(5)
   N = params['N']
   num_nodes = params['num_nodes']
+  if params['conv_dag'] is None or params['reduc_dag'] is None:
+    conv_dag = sample_arch(num_nodes)
+    reduc_dag = sample_arch(num_nodes)
   if is_training:
     drop_path_keep_prob = params['drop_path_keep_prob']
   else:
