@@ -362,11 +362,15 @@ def get_train_ops(x, y, params, reuse=False):
   loss_sharded = []
   tower_grads = []
   train_accuracy_sharded = []
+  conv_dags = []
+  reduc_dags = []
   for i in range(params['num_gpus']):
     with tf.device('/gpu:%d'%i):
       with tf.name_scope('shard_%d'%i):
         res = model.build_model(inputs_sharded[i], params, True, reuse if i==0 else True)
         logits = res['logits']
+        conv_dag = res['conv_dag']
+        reduc_dag = res['reduc_dag']
         cross_entropy = tf.losses.softmax_cross_entropy(
           logits=logits, onehot_labels=labels_sharded[i])
         if 'aux_logits' in res:
@@ -385,6 +389,8 @@ def get_train_ops(x, y, params, reuse=False):
             tf.equal(predictions, tf.argmax(labels_sharded[i], axis=1)), 
             dtype=tf.float32))
         train_accuracy_sharded.append(train_accuracy)
+        conv_dags.append(conv_dag)
+        reduc_dags.append(reduc_dag)
 
   loss = tf.reduce_mean(loss_sharded, axis=0)
   tf.summary.scalar('training_loss', loss)
@@ -401,7 +407,7 @@ def get_train_ops(x, y, params, reuse=False):
     gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
     train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
   
-  return loss, learning_rate, train_accuracy, train_op, global_step
+  return loss, learning_rate, train_accuracy, train_op, global_step, conv_dags, reduc_dags
 
 def get_valid_ops(x, y, params, reuse=False):
   with tf.device('/gpu:0'):
@@ -423,7 +429,10 @@ def get_valid_ops(x, y, params, reuse=False):
     predictions = tf.argmax(logits, axis=1)
     labels = tf.argmax(y, axis=1)
     valid_accuracy = tf.reduce_mean(tf.cast(tf.equal(predictions, labels), dtype=tf.float32))
-    return loss, valid_accuracy
+
+    conv_dag = [res['conv_dag']]
+    reduc_dag = [res['reduc_dag']]
+    return loss, valid_accuracy, conv_dag, reduc_dag
 
 def get_test_ops(x, y, params, reuse=False):
   with tf.device('/gpu:0'):
@@ -446,7 +455,10 @@ def get_test_ops(x, y, params, reuse=False):
     predictions = tf.argmax(logits, axis=1)
     labels = tf.argmax(y, axis=1)
     test_accuracy = tf.reduce_mean(tf.cast(tf.equal(predictions, labels), dtype=tf.float32))
-    return loss, test_accuracy
+
+    conv_dag = [res['conv_dag']]
+    reduc_dag = [res['reduc_dag']]
+    return loss, test_accuracy, conv_dag, reduc_dag
 
 def train(params):
   g = tf.Graph()
@@ -457,11 +469,11 @@ def train(params):
     else:
       x_valid, y_valid = None, None
     x_test, y_test = input_fn(False, 'test', params['data_dir'], 100, None, None)
-    train_loss, learning_rate, train_accuracy, train_op, global_step = get_train_ops(x_train, y_train, params)
+    train_loss, learning_rate, train_accuracy, train_op, global_step, train_conv_dags, train_reduc_dags = get_train_ops(x_train, y_train, params)
     _log_variable_sizes(tf.trainable_variables(), 'Trainable Variables')
     if x_valid and y_valid:
-      valid_loss, valid_accuracy = get_valid_ops(x_valid, y_valid, params, True)
-    test_loss, test_accuracy = get_test_ops(x_test, y_test, params, True)
+      valid_loss, valid_accuracy, valid_conv_dag, valid_reduc_dag = get_valid_ops(x_valid, y_valid, params, True)
+    test_loss, test_accuracy, test_conv_dag, test_reduc_dag = get_test_ops(x_test, y_test, params, True)
     saver = tf.train.Saver(max_to_keep=10)
     checkpoint_saver_hook = tf.train.CheckpointSaverHook(
       params['model_dir'], save_steps=params['batches_per_epoch'], saver=saver)
@@ -477,9 +489,11 @@ def train(params):
           learning_rate,
           train_accuracy,
           train_op,
-          global_step
+          global_step,
+          train_conv_dags,
+          train_reduc_dags,
         ]
-        train_loss_v, learning_rate_v, train_accuracy_v, _, global_step_v = sess.run(run_ops)
+        train_loss_v, learning_rate_v, train_accuracy_v, _, global_step_v, train_conv_dags_v, train_reduc_dags_v = sess.run(run_ops)
 
         epoch = global_step_v // params['batches_per_epoch'] 
         curr_time = time.time()
@@ -491,18 +505,26 @@ def train(params):
           log_string += "training_accuracy={:<8.4f} ".format(train_accuracy_v)
           log_string += "mins={:<10.2f}".format((curr_time - start_time) / 60)
           tf.logging.info(log_string)
+          log_string = ""
+          for i,j in zip(train_conv_dags_v, train_reduc_dags_v):
+            log_string += "{}\n{}".format(i,j)
+          tf.logging.info(log_string)
         if global_step_v % params['batches_per_epoch'] == 0:
           if x_valid and y_valid:
             valid_ops = [
-              valid_loss, valid_accuracy
+              valid_loss, valid_accuracy, valid_conv_dag, valid_reduc_dag,
             ]
             valid_start_time = time.time()
             valid_loss_list = []
             valid_accuracy_list = []
+            valid_conv_dags = []
+            valid_reduc_dags = []
             for _ in range(_NUM_IMAGES['valid'] // 100):
-              valid_loss_v, valid_accuracy_v = sess.run(valid_ops)
+              valid_loss_v, valid_accuracy_v, valid_conv_dag_v, valid_reduc_dag_v = sess.run(valid_ops)
               valid_loss_list.append(valid_loss_v)
               valid_accuracy_list.append(valid_accuracy_v)
+              valid_conv_dags.append(valid_conv_dag)
+              valid_reduc_dags.append(valid_reduc_dag)
             valid_time = time.time() - valid_start_time
             log_string =  "Evaluation on valid data\n"
             log_string += "epoch={:<6d} ".format(epoch)
@@ -512,17 +534,25 @@ def train(params):
             log_string += "valid_accuracy={:<8.6f} ".format(np.mean(valid_accuracy_list))
             log_string += "secs={:<10.2f}".format((valid_time))
             tf.logging.info(log_string)
+            log_string = ""
+            for i,j in zip(valid_conv_dags, valid_reduc_dags):
+              log_string += "{}\n{}".format(i,j)
+            tf.logging.info(log_string)
           
           test_ops = [
-            test_loss, test_accuracy
+            test_loss, test_accuracy, test_conv_dag, test_reduc_dag
           ]
           test_start_time = time.time()
           test_loss_list = []
           test_accuracy_list = []
+          test_conv_dags = []
+          test_reduc_dags = []
           for _ in range(_NUM_IMAGES['test'] // 100):
-            test_loss_v, test_accuracy_v = sess.run(test_ops)
+            test_loss_v, test_accuracy_v, test_conv_dag_v, test_reduc_dag_v = sess.run(test_ops)
             test_loss_list.append(test_loss_v)
             test_accuracy_list.append(test_accuracy_v)
+            test_conv_dags.append(test_conv_dag_v)
+            test_reduc_dags.append(test_reduc_dag_v)
           test_time = time.time() - test_start_time
           log_string =  "Evaluation on test data\n"
           log_string += "epoch={:<6d} ".format(epoch)
@@ -531,6 +561,10 @@ def train(params):
           log_string += "learning_rate={:<8.6f} ".format(learning_rate_v)
           log_string += "test_accuracy={:<8.6f} ".format(np.mean(test_accuracy_list))
           log_string += "secs={:<10.2f}".format((test_time))
+          tf.logging.info(log_string)
+          log_string = ""
+          for i,j in zip(test_conv_dags, test_reduc_dags):
+            log_string += "{}\n{}".format(i,j)
           tf.logging.info(log_string)
         if epoch >= params['train_epochs']:
           break

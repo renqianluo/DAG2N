@@ -542,7 +542,7 @@ def build_model(inputs, params, is_training, reuse=False):
           inputs = factorized_reduction(inputs, filters * filter_scaling, 2, data_format, is_training)
           layers = [layers[-1], inputs]
           inputs = reduction_cell(layers[-1], filter_scaling, 2, layers[-2], true_cell_num)
-        layers.append(inputs)
+        layers.append(layers[-1], inputs)
         true_cell_num += 1
       with tf.variable_scope('convolution_cell_%d' % (cell_num+1)):
         inputs = convolution_cell(layers[-1], filter_scaling, strides, layers[-2], true_cell_num)
@@ -567,7 +567,9 @@ def build_model(inputs, params, is_training, reuse=False):
     with tf.variable_scope('fully_connected_layer'):
       inputs = tf.layers.dense(inputs=inputs, units=num_classes)#, use_bias=_USE_BIAS)
 
-  res = {'logits': inputs}
+  res = {'logits': inputs,
+         'conv_dag': conv_dag,
+         'reduc_dag': reduc_dag}
   if use_aux_head and is_training:
     res['aux_logits'] = aux_logits
   return res
