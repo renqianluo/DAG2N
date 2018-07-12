@@ -539,10 +539,10 @@ def build_model(inputs, params, is_training, reuse=False):
       if cell_num in reduction_layers:
         filter_scaling *= 2
         with tf.variable_scope('reduction_cell_%d' % (reduction_layers.index(cell_num)+1)):
-          inputs = factorized_reduction(inputs, filters * filter_scaling, 2, data_format, is_training)
-          layers = [layers[-1], inputs]
+          #inputs = factorized_reduction(inputs, filters * filter_scaling, 2, data_format, is_training)
+          #layers = [layers[-1], inputs]
           inputs = reduction_cell(layers[-1], filter_scaling, 2, layers[-2], true_cell_num)
-        layers.append(layers[-1], inputs)
+        layers = [layers[-1], inputs]
         true_cell_num += 1
       with tf.variable_scope('convolution_cell_%d' % (cell_num+1)):
         inputs = convolution_cell(layers[-1], filter_scaling, strides, layers[-2], true_cell_num)
