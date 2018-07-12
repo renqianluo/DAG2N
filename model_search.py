@@ -115,13 +115,13 @@ class NASCell(object):
     self._is_training = is_training
     self._data_format = data_format
 
-  def _reduce_prev_layer(self, prev_layer, curr_layer):
+  def _reduce_prev_layer(self, prev_layer, curr_layer, is_training):
     if prev_layer is None:
       return curr_layer
 
     curr_num_filters = self._filter_size
     data_format = self._data_format
-    is_training = self._is_training
+    #is_training = self._is_training
 
     prev_num_filters = get_channel_dim(prev_layer, data_format)
     curr_filter_shape = int(curr_layer.shape[2])
@@ -167,7 +167,7 @@ class NASCell(object):
               initializer=one_init)
             offset = offset[prev_cell]
             scale = scale[prev_cell]
-
+          
           # the computations
           x = tf.nn.relu(x)
           x = tf.nn.conv2d(
@@ -177,7 +177,7 @@ class NASCell(object):
             data_format='NCHW' if self._data_format=='channels_first' else 'NHWC')
           #x = batch_normalization(x, self._data_format, self._is_training)
           x, _, _ = tf.nn.fused_batch_norm(
-            x, scale, offset, epsilon=_BATCH_NORM_EPSILON, is_training=self._is_training,
+            x, scale, offset, epsilon=_BATCH_NORM_EPSILON, is_training=True,
             data_format='NCHW' if self._data_format=='channels_first' else 'NHWC')
     return x
 
@@ -224,7 +224,7 @@ class NASCell(object):
             data_format='NCHW' if self._data_format=='channels_first' else 'NHWC')
           #x = batch_normalization(x, self._data_format, self._is_training)
           x, _, _ = tf.nn.fused_batch_norm(
-            x, scale, offset, epsilon=_BATCH_NORM_EPSILON, is_training=self._is_training,
+            x, scale, offset, epsilon=_BATCH_NORM_EPSILON, is_training=True,
             data_format='NCHW' if self._data_format=='channels_first' else 'NHWC')
     return x
 
@@ -245,7 +245,7 @@ class NASCell(object):
           max_pool_2 = tf.nn.relu(max_pool_2)
           max_pool_2 = tf.nn.conv2d(max_pool_2, w, strides=[1, 1, 1, 1], padding="SAME",
                                   data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
-          max_pool_2 = batch_normalization(max_pool_2, is_training=self_is_training,
+          max_pool_2 = batch_normalization(max_pool_2, is_training=True, #self_is_training,
                                 data_format=self._data_format)
   
     with tf.variable_scope('max_pool_3x3'):
@@ -262,7 +262,7 @@ class NASCell(object):
           max_pool_3 = tf.nn.relu(max_pool_3)
           max_pool_3 = tf.nn.conv2d(max_pool_3, w, strides=[1, 1, 1, 1], padding="SAME",
                                     data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
-          max_pool_3 = batch_normalization(max_pool_3, is_training=self._is_training,
+          max_pool_3 = batch_normalization(max_pool_3, is_training=True, #self._is_training,
                                            data_format=self._data_format)
     
     with tf.variable_scope('avg_pool_2x2'):
@@ -279,7 +279,7 @@ class NASCell(object):
           avg_pool_2 = tf.nn.relu(avg_pool_2)
           avg_pool_2 = tf.nn.conv2d(avg_pool_2, w, strides=[1, 1, 1, 1], padding="SAME",
                                     data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
-          avg_pool_2 = batch_normalization(avg_pool_2, is_training=self._is_training,
+          avg_pool_2 = batch_normalization(avg_pool_2, is_training=True, #self._is_training,
                                            data_format=self._data_format)
     
     with tf.variable_scope('avg_pool_3x3'):
@@ -296,7 +296,7 @@ class NASCell(object):
           avg_pool_3 = tf.nn.relu(avg_pool_3)
           avg_pool_3 = tf.nn.conv2d(avg_pool_3, w, strides=[1, 1, 1, 1], padding="SAME",
                                     data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
-          avg_pool_3 = batch_normalization(avg_pool_3, is_training=self._is_training,
+          avg_pool_3 = batch_normalization(avg_pool_3, is_training=True, #self._is_training,
                                            data_format=self._data_format)
 
     x_c = get_channel_dim(x, self._data_format)
@@ -309,7 +309,7 @@ class NASCell(object):
         x = tf.nn.relu(x)
         x = tf.nn.conv2d(x, w, strides=[1, 1, 1, 1], padding="SAME",
                          data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
-        x = batch_normalization(x, is_training=self._is_training, data_format=self._data_format)
+        x = batch_normalization(x, is_training=True, data_format=self._data_format)
 
     out = [
       x,
@@ -329,15 +329,15 @@ class NASCell(object):
     out = out[op_id, :, :, :, :]
     return out
 
-  def _cell_base(self, last_inputs, inputs):
+  def _cell_base(self, last_inputs, inputs, is_training):
     filters = self._filter_size
     data_format = self._data_format
-    is_training = self._is_training
+    #is_training = self._is_training
 
     with tf.variable_scope('transforme_last_inputs'):
       if last_inputs is None:
         last_inputs = inputs
-      last_inputs = self._reduce_prev_layer(last_inputs, inputs)
+      last_inputs = self._reduce_prev_layer(last_inputs, inputs, is_training)
     with tf.variable_scope('transforme_inputs'):
       inputs = tf.nn.relu(inputs)
       with tf.variable_scope('1x1'):
@@ -363,7 +363,7 @@ class NASCell(object):
     # node 1 and node 2 are last_inputs and inputs respectively
     # begin processing from node 3
 
-    last_inputs, inputs = self._cell_base(last_inputs, inputs)
+    last_inputs, inputs = self._cell_base(last_inputs, inputs, is_training=True)
     layers = [last_inputs, inputs]
     used = []
     for i in xrange(num_nodes):
@@ -419,7 +419,7 @@ class NASCell(object):
       out = tf.nn.relu(out)
       out = tf.nn.conv2d(out, w, strides=[1, 1, 1, 1], padding="SAME",
                          data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
-      out = batch_normalization(out, is_training=self._is_training, data_format=self._data_format)
+      out = batch_normalization(out, is_training=True, data_format=self._data_format)
 
     out = tf.reshape(out, tf.shape(prev_layers[0]))
 

@@ -399,7 +399,6 @@ def get_train_ops(x, y, params, reuse=False):
   grads = average_gradients(tower_grads)
   # Batch norm requires update ops to be added as a dependency to the train_op
   update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-  print(update_ops)
   with tf.control_dependencies(update_ops):
     #gradients, variables = zip(*optimizer.compute_gradients(loss))
     #gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
