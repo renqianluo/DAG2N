@@ -18,7 +18,7 @@ def sample_arch(num_cells):
     for branch_id in range(2):
       index = tf.random_uniform([1], minval=0, maxval=cell_id+1, dtype=tf.int32)
       arc_seq.append(index)
-      config_id = tf.random_uniform([1], minval=0, maxval=11, dtype=tf.int32)
+      config_id = tf.random_uniform([1], minval=0, maxval=11, dtype=tf.int32)#11
       arc_seq.append(config_id)
   arc_seq = tf.concat(arc_seq, axis=0)
   return arc_seq
@@ -175,7 +175,10 @@ class NASCell(object):
             filter=w,
             strides=[1, 1, 1, 1], padding="SAME",
             data_format='NCHW' if self._data_format=='channels_first' else 'NHWC')
-          x = batch_normalization(x, self._data_format, self._is_training)
+          #x = batch_normalization(x, self._data_format, self._is_training)
+          x, _, _ = tf.nn.fused_batch_norm(
+            x, scale, offset, epsilon=_BATCH_NORM_EPSILON, is_training=self._is_training,
+            data_format='NCHW' if self._data_format=='channels_first' else 'NHWC')
     return x
 
 
@@ -219,11 +222,15 @@ class NASCell(object):
             pointwise_filter=w_pointwise,
             strides=[1, 1, 1, 1], padding="SAME",
             data_format='NCHW' if self._data_format=='channels_first' else 'NHWC')
-          x = batch_normalization(x, self._data_format, self._is_training)
+          #x = batch_normalization(x, self._data_format, self._is_training)
+          x, _, _ = tf.nn.fused_batch_norm(
+            x, scale, offset, epsilon=_BATCH_NORM_EPSILON, is_training=self._is_training,
+            data_format='NCHW' if self._data_format=='channels_first' else 'NHWC')
     return x
 
   def _nas_cell(self, x, curr_cell, prev_cell, op_id, out_filters):
     num_possible_inputs = curr_cell + 1
+    
     with tf.variable_scope('max_pool_2x2'):
       max_pool_2 = tf.layers.max_pooling2d(
         x, [2, 2], [1, 1], "SAME", data_format=self._data_format)
@@ -238,9 +245,9 @@ class NASCell(object):
           max_pool_2 = tf.nn.relu(max_pool_2)
           max_pool_2 = tf.nn.conv2d(max_pool_2, w, strides=[1, 1, 1, 1], padding="SAME",
                                   data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
-          max_pool_2 = batch_normalization(max_pool_2, is_training=True,
+          max_pool_2 = batch_normalization(max_pool_2, is_training=self_is_training,
                                 data_format=self._data_format)
-
+  
     with tf.variable_scope('max_pool_3x3'):
       max_pool_3 = tf.layers.max_pooling2d(
         x, [3, 3], [1, 1], "SAME", data_format=self._data_format)
@@ -255,8 +262,9 @@ class NASCell(object):
           max_pool_3 = tf.nn.relu(max_pool_3)
           max_pool_3 = tf.nn.conv2d(max_pool_3, w, strides=[1, 1, 1, 1], padding="SAME",
                                     data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
-          max_pool_3 = batch_normalization(max_pool_3, is_training=True,
+          max_pool_3 = batch_normalization(max_pool_3, is_training=self._is_training,
                                            data_format=self._data_format)
+    
     with tf.variable_scope('avg_pool_2x2'):
       avg_pool_2 = tf.layers.average_pooling2d(
         x, [2, 2], [1, 1], "SAME", data_format=self._data_format)
@@ -271,9 +279,9 @@ class NASCell(object):
           avg_pool_2 = tf.nn.relu(avg_pool_2)
           avg_pool_2 = tf.nn.conv2d(avg_pool_2, w, strides=[1, 1, 1, 1], padding="SAME",
                                     data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
-          avg_pool_2 = batch_normalization(avg_pool_2, is_training=True,
+          avg_pool_2 = batch_normalization(avg_pool_2, is_training=self._is_training,
                                            data_format=self._data_format)
-
+    
     with tf.variable_scope('avg_pool_3x3'):
       avg_pool_3 = tf.layers.average_pooling2d(
         x, [3, 3], [1, 1], "SAME", data_format=self._data_format)
@@ -288,7 +296,7 @@ class NASCell(object):
           avg_pool_3 = tf.nn.relu(avg_pool_3)
           avg_pool_3 = tf.nn.conv2d(avg_pool_3, w, strides=[1, 1, 1, 1], padding="SAME",
                                     data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
-          avg_pool_3 = batch_normalization(avg_pool_3, is_training=True,
+          avg_pool_3 = batch_normalization(avg_pool_3, is_training=self._is_training,
                                            data_format=self._data_format)
 
     x_c = get_channel_dim(x, self._data_format)
@@ -301,7 +309,7 @@ class NASCell(object):
         x = tf.nn.relu(x)
         x = tf.nn.conv2d(x, w, strides=[1, 1, 1, 1], padding="SAME",
                          data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
-        x = batch_normalization(x, is_training=True, data_format=self._data_format)
+        x = batch_normalization(x, is_training=self._is_training, data_format=self._data_format)
 
     out = [
       x,
@@ -339,7 +347,7 @@ class NASCell(object):
           kernel_initializer=_KERNEL_INITIALIZER,
           data_format=data_format)
       with tf.variable_scope('bn'):
-        inputs = batch_normalization(inputs, data_format, is_training)
+        inputs = batch_normalization(inputs, data_format, is_training=is_training)
     return last_inputs, inputs
 
 
@@ -411,7 +419,7 @@ class NASCell(object):
       out = tf.nn.relu(out)
       out = tf.nn.conv2d(out, w, strides=[1, 1, 1, 1], padding="SAME",
                          data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
-      out = batch_normalization(out, is_training=True, data_format=self._data_format)
+      out = batch_normalization(out, is_training=self._is_training, data_format=self._data_format)
 
     out = tf.reshape(out, tf.shape(prev_layers[0]))
 
