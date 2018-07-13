@@ -5,6 +5,7 @@ from __future__ import print_function
 from six.moves import xrange
 from collections import namedtuple, OrderedDict
 import tensorflow as tf
+from tensorflow.python.training import moving_averages
 
 _BATCH_NORM_DECAY = 0.9 #0.997
 _BATCH_NORM_EPSILON = 1e-5
@@ -26,7 +27,7 @@ def sample_arch(num_cells):
 
 def create_weight(name, shape, initializer=None, trainable=True, seed=None):
   if initializer is None:
-    initializer = tf.contrib.keras.initializers.he_normal(seed=seed)
+    initializer = _KERNEL_INITIALIZER
   return tf.get_variable(name, shape, initializer=initializer, trainable=trainable)
 
 
@@ -51,12 +52,45 @@ def get_channel_index(data_format='INVALID'):
   return axis
 
 
-def batch_normalization(inputs, data_format, is_training):
-  inputs = tf.layers.batch_normalization(
-    inputs=inputs, axis=get_channel_index(data_format),
-    momentum=_BATCH_NORM_DECAY, epsilon=_BATCH_NORM_EPSILON, center=True,
-    scale=True, training=is_training, fused=True)
-  return inputs
+def batch_normalization(x, data_format, is_training):
+  if data_format == "channels_first":
+    shape = [x.get_shape()[1]]
+  elif data_format == "channels_last":
+    shape = [x.get_shape()[3]]
+  else:
+    raise NotImplementedError("Unknown data_format {}".format(data_format))
+
+  with tf.variable_scope('batch_normalization', reuse=None if is_training else True):
+    offset = tf.get_variable(
+      "offset", shape,
+      initializer=tf.constant_initializer(0.0, dtype=tf.float32))
+    scale = tf.get_variable(
+      "scale", shape,
+      initializer=tf.constant_initializer(1.0, dtype=tf.float32))
+    moving_mean = tf.get_variable(
+      "moving_mean", shape, trainable=False,
+      initializer=tf.constant_initializer(0.0, dtype=tf.float32))
+    moving_variance = tf.get_variable(
+      "moving_variance", shape, trainable=False,
+      initializer=tf.constant_initializer(1.0, dtype=tf.float32))
+
+    if is_training:
+      x, mean, variance = tf.nn.fused_batch_norm(
+        x, scale, offset, epsilon=_BATCH_NORM_EPSILON,
+        data_format='NCHW' if data_format is "channels_first" else 'NHWC',
+        is_training=True)
+      update_mean = moving_averages.assign_moving_average(
+        moving_mean, mean, _BATCH_NORM_DECAY)
+      update_variance = moving_averages.assign_moving_average(
+        moving_variance, variance, _BATCH_NORM_DECAY)
+      with tf.control_dependencies([update_mean, update_variance]):
+        x = tf.identity(x)
+    else:
+      x, _, _ = tf.nn.fused_batch_norm(x, scale, offset, mean=moving_mean,
+                                       variance=moving_variance,
+                                       epsilon=_BATCH_NORM_EPSILON, data_format=data_format,
+                                       is_training=False)
+  return x
 
 
 def factorized_reduction(inputs, filters, strides, data_format, is_training):
@@ -413,7 +447,9 @@ class NASCell(object):
       raise ValueError("Unknown data_format '{0}'".format(self._data_format))
 
     with tf.variable_scope("final_conv"):
-      w = create_weight("w", [self._num_nodes + 2, self._filter_size * self._filter_size])
+      w = create_weight("w",
+                        [self._num_nodes + 2, self._filter_size * self._filter_size],
+                        initializer=_KERNEL_INITIALIZER)
       w = tf.gather(w, indices, axis=0)
       w = tf.reshape(w, [1, 1, num_outs * self._filter_size, self._filter_size])
       out = tf.nn.relu(out)
