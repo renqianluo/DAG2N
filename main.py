@@ -57,6 +57,9 @@ parser.add_argument('--N', type=int, default=6,
 parser.add_argument('--filters', type=int, default=36,
                     help='The numer of filters.')
 
+parser.add_argument('--noise', type=float, default=None,
+                    help='The noise scale.')
+
 parser.add_argument('--drop_path_keep_prob', type=float, default=0.6,
                     help='Dropout rate.')
 
@@ -107,6 +110,9 @@ parser.add_argument('--cutout_size', type=int, default=None,
 
 parser.add_argument('--num_gpus', type=int, default=1,
                     help='Number of GPU to use.')
+
+parser.add_argument('--seed', type=int, default=None,
+                    help='Seed to use.')
 
 parser.add_argument(
     '--data_format', type=str, default=None,
@@ -579,6 +585,7 @@ def main(unused_argv):
     params = get_params()
     with open(os.path.join(params['model_dir'], 'hparams.json'), 'w') as f:
       json.dump(params, f)
+    tf.set_random_seed(params['seed'])
     train(params)
 
   elif FLAGS.mode == 'test':

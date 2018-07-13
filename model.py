@@ -10,6 +10,7 @@ _BATCH_NORM_DECAY = 0.9 #0.997
 _BATCH_NORM_EPSILON = 1e-5
 _USE_BIAS = False
 _KERNEL_INITIALIZER=tf.variance_scaling_initializer(mode='fan_out')
+relu = tf.nn.relu
 
 def get_channel_dim(x, data_format='INVALID'):
   assert data_format != 'INVALID'
@@ -56,7 +57,7 @@ def _pooling(operation, inputs, strides, data_format):
 def _separable_conv2d(operation, inputs, filters, strides, data_format, is_training):
   kernel_size, _ = _operation_to_info(operation)
 
-  inputs = tf.nn.relu(inputs) 
+  inputs = relu(inputs)
   with tf.variable_scope('separable_conv_{0}x{0}_{1}'.format(kernel_size, 1)):
     inputs = tf.layers.separable_conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
@@ -69,7 +70,7 @@ def _separable_conv2d(operation, inputs, filters, strides, data_format, is_train
     inputs = batch_normalization(inputs, data_format, is_training)
   strides = 1
 
-  inputs = tf.nn.relu(inputs)
+  inputs = relu(inputs)
   with tf.variable_scope('separable_conv_{0}x{0}_{1}'.format(kernel_size, 2)):
     inputs = tf.layers.separable_conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
@@ -90,7 +91,7 @@ def _dil_separable_conv2d(operation, inputs, filters, strides, data_format, is_t
   if not dilation_rate:
     dilation_rate = 2
 
-  inputs = tf.nn.relu(inputs) 
+  inputs = relu(inputs)
   with tf.variable_scope('dil_separable_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 1)):
     inputs = tf.layers.separable_conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
@@ -104,7 +105,7 @@ def _dil_separable_conv2d(operation, inputs, filters, strides, data_format, is_t
     inputs = batch_normalization(inputs, data_format, is_training)
   strides = 1
 
-  inputs = tf.nn.relu(inputs)
+  inputs = relu(inputs)
   with tf.variable_scope('dil_separable_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 2)):
     inputs = tf.layers.separable_conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
@@ -123,7 +124,7 @@ def _dil_separable_conv2d(operation, inputs, filters, strides, data_format, is_t
 def _conv2d(operation, inputs, filters, strides, data_format, is_training):
   kernel_size, _ = _operation_to_info(operation)
   if isinstance(kernel_size, int):
-    inputs = tf.nn.relu(inputs)
+    inputs = relu(inputs)
     with tf.variable_scope('conv_{0}x{0}_{1}'.format(kernel_size, 1)):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=filters, kernel_size=kernel_size, 
@@ -135,7 +136,7 @@ def _conv2d(operation, inputs, filters, strides, data_format, is_training):
     return inputs
   else:
     kernel_size1 = kernel_size[0]
-    inputs = tf.nn.relu(inputs) 
+    inputs = relu(inputs)
     with tf.variable_scope('conv_{0}x{1}_{2}'.format(kernel_size1[0], kernel_size1[1], 1)):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=filters, kernel_size=kernel_size1, 
@@ -147,7 +148,7 @@ def _conv2d(operation, inputs, filters, strides, data_format, is_training):
     strides = 1
 
     kernel_size2 = kernel_size[1]
-    inputs = tf.nn.relu(inputs) 
+    inputs = relu(inputs)
     with tf.variable_scope('conv_{0}x{1}_{2}'.format(kernel_size2[0], kernel_size2[1], 2)):
       inputs = tf.layers.conv2d(
         inputs=inputs, filters=filters, kernel_size=kernel_size2, 
@@ -161,7 +162,7 @@ def _conv2d(operation, inputs, filters, strides, data_format, is_training):
 
 def _dil_conv2d(operation, inputs, filters, strides, data_format, is_training):
   kernel_size, dilation_rate = _operation_to_info(operation)
-  inputs = tf.nn.relu(inputs) 
+  inputs = relu(inputs)
   with tf.variable_scope('dil_conv_{0}x{0}_{1}_{2}'.format(kernel_size, dilation_rate, 1)):
     inputs = tf.layers.conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, 
@@ -313,10 +314,10 @@ class NASCell(object):
     curr_filter_shape = int(curr_layer.shape[2])
     prev_filter_shape = int(prev_layer.shape[2])
     if curr_filter_shape != prev_filter_shape:
-      prev_layer = tf.nn.relu(prev_layer)
+      prev_layer = relu(prev_layer)
       prev_layer = factorized_reduction(prev_layer, curr_num_filters, 2, data_format, is_training)
     elif curr_num_filters != prev_num_filters:
-      prev_layer = tf.nn.relu(prev_layer)
+      prev_layer = relu(prev_layer)
       with tf.variable_scope('prev_1x1'):
         prev_layer = tf.layers.conv2d(
           inputs=prev_layer, filters=curr_num_filters, kernel_size=1, 
@@ -336,7 +337,7 @@ class NASCell(object):
     with tf.variable_scope('transforme_last_inputs'):
       last_inputs = self._reduce_prev_layer(last_inputs, inputs)
     with tf.variable_scope('transforme_inputs'):
-      inputs = tf.nn.relu(inputs)
+      inputs = relu(inputs)
       with tf.variable_scope('1x1'):
         inputs = tf.layers.conv2d(
           inputs=inputs, filters=filters, kernel_size=1, 
@@ -415,7 +416,7 @@ class NASCell(object):
       #dilation > 1 is not compatible with strides > 1, so set strides to 1, and use a 1x1 conv with expected strdies
       inputs = _dil_conv2d(operation, inputs, filters, 1, data_format, is_training)
       if strides > 1:
-        inputs = tf.nn.relu(inputs)
+        inputs = relu(inputs)
         with tf.variable_scope('1x1'):
           inputs = tf.layers.conv2d(
             inputs=inputs, filters=filters, kernel_size=1, 
@@ -430,7 +431,7 @@ class NASCell(object):
       inputs = _conv2d(operation, inputs, filters, strides, data_format, is_training)
     elif 'identity' in operation:
       if strides > 1 or (input_filters != filters):
-        inputs = tf.nn.relu(inputs)
+        inputs = relu(inputs)
         with tf.variable_scope('1x1'):
           inputs = tf.layers.conv2d(
             inputs=inputs, filters=filters, kernel_size=1, 
@@ -442,7 +443,7 @@ class NASCell(object):
     elif 'pool' in operation:
       inputs = _pooling(operation, inputs, strides, data_format)
       if input_filters != filters:
-        inputs = tf.nn.relu(inputs)
+        inputs = relu(inputs)
         with tf.variable_scope('1x1'):
           inputs = tf.layers.conv2d(
             inputs=inputs, filters=filters, kernel_size=1, 
@@ -518,7 +519,7 @@ class NASCell(object):
 
 def _build_aux_head(aux_net, num_classes, params, data_format, is_training):
   with tf.variable_scope('aux_head'):
-    aux_logits = tf.nn.relu(aux_net)
+    aux_logits = relu(aux_net)
     aux_logits = tf.layers.average_pooling2d(
       inputs=aux_logits, 
       pool_size=5, strides=3, padding='VALID', data_format=data_format)
@@ -529,7 +530,7 @@ def _build_aux_head(aux_net, num_classes, params, data_format, is_training):
         kernel_initializer=_KERNEL_INITIALIZER, 
         data_format=data_format)
       aux_logits = batch_normalization(aux_logits, data_format, is_training)
-      aux_logits = tf.nn.relu(aux_logits)
+      aux_logits = relu(aux_logits)
       
     with tf.variable_scope('avg_pool'):
       shape = aux_logits.shape
@@ -543,7 +544,7 @@ def _build_aux_head(aux_net, num_classes, params, data_format, is_training):
         kernel_initializer=_KERNEL_INITIALIZER, 
         data_format=data_format)
       aux_logits = batch_normalization(aux_logits, data_format, is_training)
-      aux_logits = tf.nn.relu(aux_logits)
+      aux_logits = relu(aux_logits)
 
     with tf.variable_scope('fc'):
       if data_format == 'channels_first':
@@ -592,6 +593,9 @@ def build_model(inputs, params, is_training, reuse=False):
   num_classes = params['num_classes']
   stem_multiplier = params['stem_multiplier']
   use_aux_head = params['use_aux_head']
+  if params['noise'] is not None:
+    global relu
+    relu = lambda x: tf.nn.relu(x+(tf.random_uniform(tf.shape(x), dtype=tf.float32)-0.5)*params['noise'])
 
   
   if data_format == 'channels_first':
@@ -646,7 +650,7 @@ def build_model(inputs, params, is_training, reuse=False):
       if use_aux_head and aux_head_ceill_index == cell_num and num_classes and is_training:
         aux_logits = _build_aux_head(inputs, num_classes, params, data_format, is_training)
 
-    inputs = tf.nn.relu(inputs)
+    inputs = relu(inputs)
 
     assert inputs.shape.ndims == 4
         
