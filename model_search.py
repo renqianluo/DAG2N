@@ -77,7 +77,7 @@ def batch_normalization(x, data_format, is_training):
     if is_training:
       x, mean, variance = tf.nn.fused_batch_norm(
         x, scale, offset, epsilon=_BATCH_NORM_EPSILON,
-        data_format='NCHW' if data_format is "channels_first" else 'NHWC',
+        data_format='NCHW' if data_format == "channels_first" else 'NHWC',
         is_training=True)
       update_mean = moving_averages.assign_moving_average(
         moving_mean, mean, _BATCH_NORM_DECAY)
@@ -88,7 +88,8 @@ def batch_normalization(x, data_format, is_training):
     else:
       x, _, _ = tf.nn.fused_batch_norm(x, scale, offset, mean=moving_mean,
                                        variance=moving_variance,
-                                       epsilon=_BATCH_NORM_EPSILON, data_format=data_format,
+                                       epsilon=_BATCH_NORM_EPSILON,
+                                       data_format='NCHW' if data_format == "channels_first" else 'NHWC',
                                        is_training=False)
   return x
 
