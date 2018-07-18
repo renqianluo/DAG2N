@@ -410,7 +410,7 @@ def get_train_ops(x, y, params, reuse=False):
     gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
     train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
   
-  return loss, learning_rate, train_accuracy, train_op, global_step, conv_dags, reduc_dags
+  return loss, learning_rate, train_accuracy, train_op, global_step#, conv_dags, reduc_dags
 
 def get_valid_ops(x, y, params, reuse=False):
   with tf.device('/gpu:0'):
@@ -433,9 +433,9 @@ def get_valid_ops(x, y, params, reuse=False):
     labels = tf.argmax(y, axis=1)
     valid_accuracy = tf.reduce_mean(tf.cast(tf.equal(predictions, labels), dtype=tf.float32))
 
-    conv_dag = [res['conv_dag']]
-    reduc_dag = [res['reduc_dag']]
-    return loss, valid_accuracy, conv_dag, reduc_dag
+    #conv_dag = [res['conv_dag']]
+    #reduc_dag = [res['reduc_dag']]
+    return loss, valid_accuracy#, conv_dag, reduc_dag
 
 def get_test_ops(x, y, params, reuse=False):
   with tf.device('/gpu:0'):
@@ -459,8 +459,8 @@ def get_test_ops(x, y, params, reuse=False):
     labels = tf.argmax(y, axis=1)
     test_accuracy = tf.reduce_mean(tf.cast(tf.equal(predictions, labels), dtype=tf.float32))
 
-    conv_dag = [res['conv_dag']]
-    reduc_dag = [res['reduc_dag']]
+    #conv_dag = [res['conv_dag']]
+    #reduc_dag = [res['reduc_dag']]
     return loss, test_accuracy #, conv_dag, reduc_dag
 
 def train(params):
@@ -474,10 +474,10 @@ def train(params):
     x_test, y_test = input_fn(False, 'test', params['data_dir'], 100, None, None)
     train_loss, learning_rate, train_accuracy, train_op, global_step = get_train_ops(x_train, y_train, params)
     _log_variable_sizes(tf.trainable_variables(), 'Trainable Variables')
-    if x_valid and y_valid:
+    if params['split_train_valid']:
       valid_loss, valid_accuracy = get_valid_ops(x_valid, y_valid, params, True)
     test_loss, test_accuracy = get_test_ops(x_test, y_test, params, True)
-    saver = tf.train.Saver(max_to_keep=10)
+    saver = tf.train.Saver(max_to_keep=100)
     checkpoint_saver_hook = tf.train.CheckpointSaverHook(
       params['model_dir'], save_steps=params['batches_per_epoch']*params['save_frequency'], saver=saver)
     hooks = [checkpoint_saver_hook]
@@ -513,7 +513,7 @@ def train(params):
           #  log_string += "{}\n{}".format(i,j)
           #tf.logging.info(log_string)
         if global_step_v % params['batches_per_epoch'] == 0:
-          if x_valid and y_valid:
+          if params['split_train_valid']:
             valid_ops = [
               valid_loss, valid_accuracy, #valid_conv_dag, valid_reduc_dag,
             ]
@@ -572,6 +572,69 @@ def train(params):
         if epoch >= params['train_epochs']:
           break
 
+def test(params):
+  g = tf.Graph()
+  with g.as_default(), tf.device('/cpu:0'):
+    if FLAGS.split_train_valid:
+      x_valid, y_valid = input_fn(True, 'valid', FLAGS.data_dir, 100, None, 1)
+    else:
+      x_valid, y_valid = None, None
+    x_test, y_test = input_fn(False, 'test', FLAGS.data_dir, 100, None, 1)
+    if params['split_train_valid']:
+      valid_loss, valid_accuracy = get_valid_ops(x_valid, y_valid, params, False)
+    test_loss, test_accuracy = get_test_ops(x_test, y_test, params, True)
+    saver = tf.train.Saver(max_to_keep=10)
+    checkpoint_saver_hook = tf.train.CheckpointSaverHook(
+      FLAGS.model_dir, save_steps=params['batches_per_epoch']*params['save_frequency'], saver=saver)
+    hooks = [checkpoint_saver_hook]
+    tf.logging.info('Starting Session')
+    config = tf.ConfigProto(allow_soft_placement=True)
+    with tf.train.SingularMonitoredSession(
+      config=config, hooks=hooks, checkpoint_dir=FLAGS.model_dir) as sess:
+      start_time = time.time()
+        if FLAGS.split_train_valid:
+          valid_ops = [
+            valid_loss, valid_accuracy
+          ]
+          valid_start_time = time.time()
+          valid_loss_list = []
+          valid_accuracy_list = []
+          while True:
+            try:
+            #for _ in range(_NUM_IMAGES['valid'] // 100):
+              valid_loss_v, valid_accuracy_v = sess.run(valid_ops)
+              valid_loss_list.append(valid_loss_v)
+              valid_accuracy_list.append(valid_accuracy_v)
+            except:
+              pass
+          valid_time = time.time() - valid_start_time
+          log_string =  "Evaluation on valid data\n"
+          log_string += "loss={:<6f} ".format(np.mean(valid_loss_list))
+          log_string += "valid_accuracy={:<8.6f} ".format(np.mean(valid_accuracy_list))
+          log_string += "secs={:<10.2f}".format((valid_time))
+          tf.logging.info(log_string)
+          
+        test_ops = [
+          test_loss, test_accuracy
+        ]
+        test_start_time = time.time()
+        test_loss_list = []
+        test_accuracy_list = []
+        while True:
+          try:
+        #for _ in range(_NUM_IMAGES['test'] // 100):
+            test_loss_v, test_accuracy_v = sess.run(test_ops)
+            test_loss_list.append(test_loss_v)
+            test_accuracy_list.append(test_accuracy_v)
+          except:
+            pass
+        test_time = time.time() - test_start_time
+        log_string =  "Evaluation on test data\n"
+        log_string += "loss={:<6f} ".format(np.mean(test_loss_list))
+        log_string += "test_accuracy={:<8.6f} ".format(np.mean(test_accuracy_list))
+        log_string += "secs={:<10.2f}".format((test_time))
+        tf.logging.info(log_string)
+
 
 def build_dag(arch):
   if arch is None:
@@ -626,7 +689,8 @@ def main(unused_argv):
     train(params)
 
   elif FLAGS.mode == 'test':
-    pass
+    params = get_params()
+    test(params)
 
 
 if __name__ == '__main__':
