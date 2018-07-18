@@ -60,7 +60,7 @@ def batch_normalization(x, data_format, is_training):
   else:
     raise NotImplementedError("Unknown data_format {}".format(data_format))
 
-  with tf.variable_scope('batch_normalization', reuse=None if is_training else True):
+  with tf.variable_scope('batch_normalization'):#, reuse=None if is_training else True):
     offset = tf.get_variable(
       "offset", shape,
       initializer=tf.constant_initializer(0.0, dtype=tf.float32))

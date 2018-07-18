@@ -585,55 +585,55 @@ def test(params):
     test_loss, test_accuracy = get_test_ops(x_test, y_test, params, True)
     saver = tf.train.Saver(max_to_keep=10)
     checkpoint_saver_hook = tf.train.CheckpointSaverHook(
-      FLAGS.model_dir, save_steps=params['batches_per_epoch']*params['save_frequency'], saver=saver)
+      FLAGS.model_dir, save_steps=1000, saver=saver)
     hooks = [checkpoint_saver_hook]
     tf.logging.info('Starting Session')
     config = tf.ConfigProto(allow_soft_placement=True)
     with tf.train.SingularMonitoredSession(
       config=config, hooks=hooks, checkpoint_dir=FLAGS.model_dir) as sess:
       start_time = time.time()
-        if FLAGS.split_train_valid:
-          valid_ops = [
-            valid_loss, valid_accuracy
-          ]
-          valid_start_time = time.time()
-          valid_loss_list = []
-          valid_accuracy_list = []
-          while True:
-            try:
-            #for _ in range(_NUM_IMAGES['valid'] // 100):
-              valid_loss_v, valid_accuracy_v = sess.run(valid_ops)
-              valid_loss_list.append(valid_loss_v)
-              valid_accuracy_list.append(valid_accuracy_v)
-            except:
-              pass
-          valid_time = time.time() - valid_start_time
-          log_string =  "Evaluation on valid data\n"
-          log_string += "loss={:<6f} ".format(np.mean(valid_loss_list))
-          log_string += "valid_accuracy={:<8.6f} ".format(np.mean(valid_accuracy_list))
-          log_string += "secs={:<10.2f}".format((valid_time))
-          tf.logging.info(log_string)
-          
-        test_ops = [
-          test_loss, test_accuracy
+      if FLAGS.split_train_valid:
+        valid_ops = [
+          valid_loss, valid_accuracy
         ]
-        test_start_time = time.time()
-        test_loss_list = []
-        test_accuracy_list = []
+        valid_start_time = time.time()
+        valid_loss_list = []
+        valid_accuracy_list = []
         while True:
           try:
-        #for _ in range(_NUM_IMAGES['test'] // 100):
-            test_loss_v, test_accuracy_v = sess.run(test_ops)
-            test_loss_list.append(test_loss_v)
-            test_accuracy_list.append(test_accuracy_v)
+          #for _ in range(_NUM_IMAGES['valid'] // 100):
+            valid_loss_v, valid_accuracy_v = sess.run(valid_ops)
+            valid_loss_list.append(valid_loss_v)
+            valid_accuracy_list.append(valid_accuracy_v)
           except:
             pass
-        test_time = time.time() - test_start_time
-        log_string =  "Evaluation on test data\n"
-        log_string += "loss={:<6f} ".format(np.mean(test_loss_list))
-        log_string += "test_accuracy={:<8.6f} ".format(np.mean(test_accuracy_list))
-        log_string += "secs={:<10.2f}".format((test_time))
+        valid_time = time.time() - valid_start_time
+        log_string =  "Evaluation on valid data\n"
+        log_string += "loss={:<6f} ".format(np.mean(valid_loss_list))
+        log_string += "valid_accuracy={:<8.6f} ".format(np.mean(valid_accuracy_list))
+        log_string += "secs={:<10.2f}".format((valid_time))
         tf.logging.info(log_string)
+          
+      test_ops = [
+        test_loss, test_accuracy
+      ]
+      test_start_time = time.time()
+      test_loss_list = []
+      test_accuracy_list = []
+      while True:
+        try:
+        #for _ in range(_NUM_IMAGES['test'] // 100):
+          test_loss_v, test_accuracy_v = sess.run(test_ops)
+          test_loss_list.append(test_loss_v)
+          test_accuracy_list.append(test_accuracy_v)
+        except:
+          pass
+      test_time = time.time() - test_start_time
+      log_string =  "Evaluation on test data\n"
+      log_string += "loss={:<6f} ".format(np.mean(test_loss_list))
+      log_string += "test_accuracy={:<8.6f} ".format(np.mean(test_accuracy_list))
+      log_string += "secs={:<10.2f}".format((test_time))
+      tf.logging.info(log_string)
 
 
 def build_dag(arch):
