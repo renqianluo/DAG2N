@@ -44,6 +44,10 @@ parser.add_argument('--mode', type=str, default='train',
 parser.add_argument('--data_dir', type=str, default='/tmp/cifar10_data',
                     help='The path to the CIFAR-10 data directory.')
 
+parser.add_argument('--eval_dataset', type=str, default='valid',
+                    choices=['valid', 'test', 'both'],
+                    help='Data to eval.')
+
 parser.add_argument('--model_dir', type=str, default='/tmp/cifar10_model',
                     help='The directory where the model will be stored.')
 
@@ -572,41 +576,34 @@ def train(params):
         if epoch >= params['train_epochs']:
           break
 
-def test(params):
+def test(params, dataset):
   g = tf.Graph()
   with g.as_default(), tf.device('/cpu:0'):
-    if FLAGS.split_train_valid:
+    if dataset in ['valid', 'both']:
       x_valid, y_valid = input_fn(True, 'valid', FLAGS.data_dir, 100, None, 1)
-    else:
-      x_valid, y_valid = None, None
-    x_test, y_test = input_fn(False, 'test', FLAGS.data_dir, 100, None, 1)
-    if params['split_train_valid']:
       valid_loss, valid_accuracy = get_valid_ops(x_valid, y_valid, params, False)
-    test_loss, test_accuracy = get_test_ops(x_test, y_test, params, True)
-    saver = tf.train.Saver(max_to_keep=10)
-    checkpoint_saver_hook = tf.train.CheckpointSaverHook(
-      FLAGS.model_dir, save_steps=1000, saver=saver)
-    hooks = [checkpoint_saver_hook]
+    if dataset in ['test', 'both']:
+      test_loss, test_accuracy = get_test_ops(x_test, y_test, params, True)
+      x_test, y_test = input_fn(False, 'test', FLAGS.data_dir, 100, None, 1)
     tf.logging.info('Starting Session')
     config = tf.ConfigProto(allow_soft_placement=True)
     with tf.train.SingularMonitoredSession(
-      config=config, hooks=hooks, checkpoint_dir=FLAGS.model_dir) as sess:
+      config=config, checkpoint_dir=FLAGS.model_dir) as sess:
       start_time = time.time()
-      if FLAGS.split_train_valid:
+      if dataset in ['valid', 'both']:
         valid_ops = [
           valid_loss, valid_accuracy
         ]
         valid_start_time = time.time()
         valid_loss_list = []
         valid_accuracy_list = []
-        while True:
-          try:
-          #for _ in range(_NUM_IMAGES['valid'] // 100):
-            valid_loss_v, valid_accuracy_v = sess.run(valid_ops)
-            valid_loss_list.append(valid_loss_v)
-            valid_accuracy_list.append(valid_accuracy_v)
-          except:
-            pass
+          #try:
+        for _ in range(_NUM_IMAGES['valid'] // 100):
+          valid_loss_v, valid_accuracy_v = sess.run(valid_ops)
+          valid_loss_list.append(valid_loss_v)
+          valid_accuracy_list.append(valid_accuracy_v)
+          #except:
+            #pass
         valid_time = time.time() - valid_start_time
         log_string =  "Evaluation on valid data\n"
         log_string += "loss={:<6f} ".format(np.mean(valid_loss_list))
@@ -614,45 +611,37 @@ def test(params):
         log_string += "secs={:<10.2f}".format((valid_time))
         tf.logging.info(log_string)
           
-      test_ops = [
-        test_loss, test_accuracy
-      ]
-      test_start_time = time.time()
-      test_loss_list = []
-      test_accuracy_list = []
-      while True:
-        try:
-        #for _ in range(_NUM_IMAGES['test'] // 100):
+      if dataset in ['test', 'both']:
+        test_ops = [
+          test_loss, test_accuracy
+        ]
+        test_start_time = time.time()
+        test_loss_list = []
+        test_accuracy_list = []
+        #while True:
+          #try:
+        for _ in range(_NUM_IMAGES['test'] // 100):
           test_loss_v, test_accuracy_v = sess.run(test_ops)
           test_loss_list.append(test_loss_v)
           test_accuracy_list.append(test_accuracy_v)
-        except:
-          pass
-      test_time = time.time() - test_start_time
-      log_string =  "Evaluation on test data\n"
-      log_string += "loss={:<6f} ".format(np.mean(test_loss_list))
-      log_string += "test_accuracy={:<8.6f} ".format(np.mean(test_accuracy_list))
-      log_string += "secs={:<10.2f}".format((test_time))
-      tf.logging.info(log_string)
+          #except:
+            #pass
+        test_time = time.time() - test_start_time
+        log_string =  "Evaluation on test data\n"
+        log_string += "loss={:<6f} ".format(np.mean(test_loss_list))
+        log_string += "test_accuracy={:<8.6f} ".format(np.mean(test_accuracy_list))
+        log_string += "secs={:<10.2f}".format((test_time))
+        tf.logging.info(log_string)
 
 
 def build_dag(arch):
   if arch is None:
     return None, None
-  # assume arch is the format [idex, op ...] where index is in [1,6] and op in [7, 17]
-  # need convert index to [0, 5] and op to [0, 10]
-  def _parse(s):
-    res = []
-    l = len(s)
-    for i in range(l):
-      if i % 2 == 0:
-        res.append(s[i]-1)
-      else:
-        res.append(s[i]-7)
+  # assume arch is the format [idex, op ...] where index is in [0, 5] and op in [0, 10]
   arch = list(map(int, arch.strip().split()))
   length = len(arch)
-  conv_dag = _parse(arch[:length//2])
-  reduc_dag = _parse(arch[length//2:])
+  conv_dag = arch[:length//2]
+  reduc_dag = arch[length//2:]
   return conv_dag, reduc_dag
 
 
@@ -689,8 +678,14 @@ def main(unused_argv):
     train(params)
 
   elif FLAGS.mode == 'test':
-    params = get_params()
-    test(params)
+    with open(os.path.join(FLAGS.model_dir, 'hparams.json'), 'r') as f:
+      params = json.load(f)
+    conv_dag, reduc_dag = build_dag(FLAGS.dag)
+    tf.logging.info('convolution cell:{}'.format(conv_dag))
+    tf.logging.info('reduction cell:{}'.format(conv_dag))
+    params['conv_dag'] = conv_dag
+    params['reduc_dag'] = reduc_dag
+    test(params, FLAGS.eval_dataset)
 
 
 if __name__ == '__main__':

@@ -527,6 +527,9 @@ def build_model(inputs, params, is_training, reuse=False):
   if params['conv_dag'] is None or params['reduc_dag'] is None:
     conv_dag = sample_arch(num_nodes)
     reduc_dag = sample_arch(num_nodes)
+  else:
+    conv_dag = params['conv_dag']
+    reduc_dag = params['reduc_dag']
   if is_training:
     drop_path_keep_prob = params['drop_path_keep_prob']
   else:
