@@ -274,23 +274,6 @@ class NASCell(object):
   def _nas_cell(self, x, curr_cell, prev_cell, op_id, out_filters):
     num_possible_inputs = curr_cell + 1
     
-    with tf.variable_scope('max_pool_2x2'):
-      max_pool_2 = tf.layers.max_pooling2d(
-        x, [2, 2], [1, 1], "SAME", data_format=self._data_format)
-      max_pool_c = get_channel_dim(max_pool_2, self._data_format)
-      if max_pool_c != out_filters:
-        with tf.variable_scope("conv"):
-          w = create_weight(
-            "w", [num_possible_inputs, max_pool_c * out_filters],
-            initializer=_KERNEL_INITIALIZER)
-          w = w[prev_cell]
-          w = tf.reshape(w, [1, 1, max_pool_c, out_filters])
-          max_pool_2 = tf.nn.relu(max_pool_2)
-          max_pool_2 = tf.nn.conv2d(max_pool_2, w, strides=[1, 1, 1, 1], padding="SAME",
-                                  data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
-          max_pool_2 = batch_normalization(max_pool_2, is_training=True, #self_is_training,
-                                data_format=self._data_format)
-  
     with tf.variable_scope('max_pool_3x3'):
       max_pool_3 = tf.layers.max_pooling2d(
         x, [3, 3], [1, 1], "SAME", data_format=self._data_format)
@@ -306,23 +289,6 @@ class NASCell(object):
           max_pool_3 = tf.nn.conv2d(max_pool_3, w, strides=[1, 1, 1, 1], padding="SAME",
                                     data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
           max_pool_3 = batch_normalization(max_pool_3, is_training=True, #self._is_training,
-                                           data_format=self._data_format)
-    
-    with tf.variable_scope('avg_pool_2x2'):
-      avg_pool_2 = tf.layers.average_pooling2d(
-        x, [2, 2], [1, 1], "SAME", data_format=self._data_format)
-      avg_pool_c = get_channel_dim(avg_pool_2, self._data_format)
-      if avg_pool_c != out_filters:
-        with tf.variable_scope("conv"):
-          w = create_weight(
-            "w", [num_possible_inputs, avg_pool_c * out_filters],
-            initializer=_KERNEL_INITIALIZER)
-          w = w[prev_cell]
-          w = tf.reshape(w, [1, 1, avg_pool_c, out_filters])
-          avg_pool_2 = tf.nn.relu(avg_pool_2)
-          avg_pool_2 = tf.nn.conv2d(avg_pool_2, w, strides=[1, 1, 1, 1], padding="SAME",
-                                    data_format='NCHW' if self._data_format == 'channels_first' else 'NHWC')
-          avg_pool_2 = batch_normalization(avg_pool_2, is_training=True, #self._is_training,
                                            data_format=self._data_format)
     
     with tf.variable_scope('avg_pool_3x3'):
@@ -356,15 +322,9 @@ class NASCell(object):
 
     out = [
       x,
-      self._nas_conv(x, curr_cell, prev_cell, 1, out_filters),
-      self._nas_conv(x, curr_cell, prev_cell, 2, out_filters),
-      self._nas_conv(x, curr_cell, prev_cell, 3, out_filters),
-      self._nas_sep_conv(x, curr_cell, prev_cell, 1, out_filters),
-      self._nas_sep_conv(x, curr_cell, prev_cell, 2, out_filters),
       self._nas_sep_conv(x, curr_cell, prev_cell, 3, out_filters),
-      max_pool_2,
+      self._nas_sep_conv(x, curr_cell, prev_cell, 5, out_filters),
       max_pool_3,
-      avg_pool_2,
       avg_pool_3
     ]
 

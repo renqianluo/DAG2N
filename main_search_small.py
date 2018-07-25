@@ -14,7 +14,7 @@ import json
 import math
 import time
 import datetime
-import model_search as model
+import model_search_small as model
 import dag
 
 _HEIGHT = 32
