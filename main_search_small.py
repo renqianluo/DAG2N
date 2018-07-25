@@ -490,7 +490,7 @@ def train(params):
     if params['split_train_valid']:
       valid_loss, valid_accuracy = get_valid_ops(x_valid, y_valid, params, True)
     test_loss, test_accuracy = get_test_ops(x_test, y_test, params, True)
-    saver = tf.train.Saver(max_to_keep=100)
+    saver = tf.train.Saver(max_to_keep=1000)
     checkpoint_saver_hook = tf.train.CheckpointSaverHook(
       params['model_dir'], save_steps=params['batches_per_epoch']*params['save_frequency'], saver=saver)
     hooks = [checkpoint_saver_hook]
