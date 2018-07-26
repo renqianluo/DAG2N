@@ -26,12 +26,16 @@ def sample_arch(num_cells):
 
 def sample_arch_from_pool(arch_pool, prob=None):
   N = len(arch_pool)
+  arch_pool = tf.convert_to_tensor(arch_pool, dtype=tf.int32)
   if prob is not None:
     prob = tf.expand_dims(tf.squeeze(prob),axis=0)
     index = tf.multinomial(prob, 1)[0][0]
   else:
     index = tf.random_uniform([], minval=0, maxval=N, dtype=tf.int32)
-  return arch_pool[index]
+  arch = arch_pool[index]
+  conv_dag = arch[0]
+  reduc_dag = arch[1]
+  return conv_dag, reduc_dag
 
 def create_weight(name, shape, initializer=None, trainable=True, seed=None):
   if initializer is None:
@@ -537,7 +541,7 @@ def build_model(inputs, params, is_training, reuse=False):
       conv_dag = sample_arch(num_nodes)
       reduc_dag = sample_arch(num_nodes)
     else:
-      conv_dag, reduc_dag = sample_arch_from_pool(params['arch_pool'], params['prob'])
+      conv_dag, reduc_dag = sample_arch_from_pool(params['arch_pool'], params['arch_pool_prob'])
   else:
     conv_dag = params['conv_dag']
     reduc_dag = params['reduc_dag']

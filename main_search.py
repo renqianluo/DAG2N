@@ -669,6 +669,7 @@ def get_params():
   params['conv_dag'] = conv_dag
   params['reduc_dag'] = reduc_dag
   params['total_steps'] = total_steps
+  params['arch_pool_prob'] = None
   if FLAGS.arch_pool is not None:
     with open(FLAGS.arch_pool) as f:
       archs = f.read().splitlines()

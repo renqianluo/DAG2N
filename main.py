@@ -21,7 +21,6 @@ import dag
 _HEIGHT = 32
 _WIDTH = 32
 _DEPTH = 3
-_NUM_CLASSES = 10
 _NUM_DATA_FILES = 5
 
 _WEIGHT_DECAY = 5e-4 #1e-4
@@ -44,6 +43,9 @@ parser.add_argument('--mode', type=str, default='train',
 
 parser.add_argument('--data_dir', type=str, default='/tmp/cifar10_data',
                     help='The path to the CIFAR-10 data directory.')
+
+parser.add_argument('--dataset', type=str, default='cifar10',
+                    help='CIFAR-10 or CIFAR-100.')
 
 parser.add_argument('--model_dir', type=str, default='/tmp/cifar10_model',
                     help='The directory where the model will be stored.')
@@ -142,45 +144,61 @@ parser.add_argument('--T_mul', type=int, default=2,
                     help='Multiplicator for the cycle.')
 
 
-def record_dataset(filenames):
+def record_dataset(filenames, dataset):
   """Returns an input pipeline Dataset from `filenames`."""
-  record_bytes = _HEIGHT * _WIDTH * _DEPTH + 1
+  if dataset == 'cifar10':
+    record_bytes = _HEIGHT * _WIDTH * _DEPTH + 1
+  elif dataset == 'cifar100':
+    record_bytes = _HEIGHT * _WIDTH * _DEPTH + 2
   return tf.data.FixedLengthRecordDataset(filenames, record_bytes)
 
 
-def get_filenames(split, mode, data_dir):
+def get_filenames(split, mode, data_dir, dataset):
   """Returns a list of filenames."""
-  if not split:
-    data_dir = os.path.join(data_dir, 'cifar-10-batches-bin')
+  if dataset == 'cifar10':
+    if not split:
+      data_dir = os.path.join(data_dir, 'cifar-10-batches-bin')
 
-  assert os.path.exists(data_dir), (
-      'Run cifar10_download_and_extract.py first to download and extract the '
-      'CIFAR-10 data.')
+    assert os.path.exists(data_dir), (
+        'Run cifar10_download_and_extract.py first to download and extract the '
+        'CIFAR-10 data.')
 
-  if split:
-    if mode == 'train':
-      return [
-        os.path.join(data_dir, 'train_batch_%d.bin' % i)
-        for i in range(1, _NUM_DATA_FILES + 1)]
-    elif mode == 'valid':
-      return [os.path.join(data_dir, 'valid_batch.bin')]
+    if split:
+      if mode == 'train':
+        return [
+          os.path.join(data_dir, 'train_batch_%d.bin' % i)
+          for i in range(1, _NUM_DATA_FILES + 1)]
+      elif mode == 'valid':
+        return [os.path.join(data_dir, 'valid_batch.bin')]
+      else:
+        return [os.path.join(data_dir, 'test_batch.bin')]
     else:
-      return [os.path.join(data_dir, 'test_batch.bin')]
-  else:
-    if mode == 'train':
-      return [
-        os.path.join(data_dir, 'data_batch_%d.bin' % i)
-        for i in range(1, _NUM_DATA_FILES + 1)
+      if mode == 'train':
+        return [
+          os.path.join(data_dir, 'data_batch_%d.bin' % i)
+          for i in range(1, _NUM_DATA_FILES + 1)
     ]
+      else:
+        return [os.path.join(data_dir, 'test_batch.bin')]
+  
+  elif dataset == 'cifar100':
+    data_dir = os.path.join(data_dir, 'cifar-100-binary')
+
+    assert os.path.exists(data_dir)
+
+    if mode == 'train':
+      return [os.path.join(data_dir, 'train.bin')]
     else:
-      return [os.path.join(data_dir, 'test_batch.bin')]
+      return [os.path.join(data_dir, 'test.bin')]
 
-
-def parse_record(raw_record):
+def parse_record(raw_record, dataset):
   """Parse CIFAR-10 image and label from a raw record."""
   # Every record consists of a label followed by the image, with a fixed number
   # of bytes for each.
-  label_bytes = 1
+  if dataset == 'cifar10':
+    label_bytes = 1
+  elif dataset == 'cifar100':
+    label_bytes = 2
   image_bytes = _HEIGHT * _WIDTH * _DEPTH
   record_bytes = label_bytes + image_bytes
 
@@ -189,8 +207,12 @@ def parse_record(raw_record):
 
   # The first byte represents the label, which we convert from uint8 to int32
   # and then to one-hot.
-  label = tf.cast(record_vector[0], tf.int32)
-  label = tf.one_hot(label, _NUM_CLASSES)
+  if dataset == 'cifar10':
+    label = tf.cast(record_vector[0], tf.int32)
+    label = tf.one_hot(label, 10)
+  elif dataset == 'cifar100':
+    label = tf.cast(record_vector[1], tf.int32)
+    label = tf.one_hot(label, 100)
 
   # The remaining bytes after the label represent the image, which we reshape
   # from [depth * height * width] to [depth, height, width].
@@ -233,7 +255,7 @@ def preprocess_image(image, mode, cutout_size):
   return image
 
 
-def input_fn(split, mode, data_dir, batch_size, cutout_size, num_epochs=1):
+def input_fn(split, mode, data_dir, dataset, batch_size, cutout_size, num_epochs=1):
   """Input_fn using the tf.data input pipeline for CIFAR-10 dataset.
 
   Args:
@@ -245,23 +267,23 @@ def input_fn(split, mode, data_dir, batch_size, cutout_size, num_epochs=1):
   Returns:
     A tuple of images and labels.
   """
-  dataset = record_dataset(get_filenames(split, mode, data_dir))
+  data_set = record_dataset(get_filenames(split, mode, data_dir, dataset), dataset)
 
   if mode == 'train':
     if split:
-      dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train'])
+      data_set = data_set.shuffle(buffer_size=_NUM_IMAGES['train'])
     else:
-      dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train']+_NUM_IMAGES['valid'])
+      data_set = data_set.shuffle(buffer_size=_NUM_IMAGES['train']+_NUM_IMAGES['valid'])
 
-  dataset = dataset.map(parse_record, num_parallel_calls=4)
-  dataset = dataset.map(
+  data_set = data_set.map(lambda x:parse_record(x, dataset), num_parallel_calls=4)
+  data_set = data_set.map(
       lambda image, label: (preprocess_image(image, mode, cutout_size), label),
       num_parallel_calls=4)
 
-  dataset = dataset.repeat(num_epochs)
-  dataset = dataset.batch(batch_size)
-  dataset = dataset.prefetch(10)
-  iterator = dataset.make_one_shot_iterator()
+  data_set = data_set.repeat(num_epochs)
+  data_set = data_set.batch(batch_size)
+  data_set = data_set.prefetch(10)
+  iterator = data_set.make_one_shot_iterator()
   images, labels = iterator.get_next()
 
   return images, labels
@@ -458,12 +480,12 @@ def get_test_ops(x, y, params, reuse=False):
 def train(params):
   g = tf.Graph()
   with g.as_default(), tf.device('/cpu:0'):
-    x_train, y_train = input_fn(params['split_train_valid'], 'train', params['data_dir'], params['batch_size'], params['cutout_size'], None)
+    x_train, y_train = input_fn(params['split_train_valid'], 'train', params['data_dir'], params['dataset'], params['batch_size'], params['cutout_size'], None)
     if params['split_train_valid']:
-      x_valid, y_valid = input_fn(params['split_train_valid'], 'valid', params['data_dir'], 100, None, None)
+      x_valid, y_valid = input_fn(params['split_train_valid'], 'valid', params['data_dir'], paramsp['dataset'], 100, None, None)
     else:
       x_valid, y_valid = None, None
-    x_test, y_test = input_fn(False, 'test', params['data_dir'], 100, None, None)
+    x_test, y_test = input_fn(False, 'test', params['data_dir'], params['dataset'], 100, None, None)
     train_loss, learning_rate, train_accuracy, train_op, global_step = get_train_ops(x_train, y_train, params)
     _log_variable_sizes(tf.trainable_variables(), 'Trainable Variables')
     if x_valid and y_valid:
@@ -561,7 +583,10 @@ def get_params():
     total_steps = int(FLAGS.train_epochs * (_NUM_IMAGES['train'] + _NUM_IMAGES['valid']) / float(FLAGS.batch_size))
   
   params = vars(FLAGS)
-  params['num_classes'] = _NUM_CLASSES
+  if params['dataset'] == 'cifar10':
+    params['num_classes'] = 10
+  elif params['dataset'] == 'cifar100':
+    params['num_classes'] = 100
   params['conv_dag'] = conv_dag
   params['reduc_dag'] = reduc_dag
   params['total_steps'] = total_steps
