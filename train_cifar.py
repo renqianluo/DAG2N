@@ -45,7 +45,7 @@ parser.add_argument('--data_dir', type=str, default='/tmp/cifar10_data',
                     help='The path to the CIFAR-10 data directory.')
 
 parser.add_argument('--dataset', type=str, default='cifar10',
-                    help='CIFAR-10 or CIFAR-100.')
+                    help='CIFAR-10, CIFAR-100.')
 
 parser.add_argument('--model_dir', type=str, default='/tmp/cifar10_model',
                     help='The directory where the model will be stored.')
@@ -58,9 +58,6 @@ parser.add_argument('--N', type=int, default=6,
 
 parser.add_argument('--filters', type=int, default=36,
                     help='The numer of filters.')
-
-parser.add_argument('--noise', type=float, default=None,
-                    help='The noise scale.')
 
 parser.add_argument('--drop_path_keep_prob', type=float, default=0.6,
                     help='Dropout rate.')
@@ -91,9 +88,6 @@ parser.add_argument('--hparams', type=str, default=None,
 
 parser.add_argument('--split_train_valid', action='store_true', default=False,
                     help='Split training data to train set and valid set.')
-
-parser.add_argument('--activation', type=str, default=None,
-          help='Activation function for convolutions.')
 
 parser.add_argument('--use_nesterov', action='store_true', default=False,
                     help='Use nesterov in Momentum Optimizer.')
@@ -143,16 +137,20 @@ parser.add_argument('--T_0', type=int, default=10,
 parser.add_argument('--T_mul', type=int, default=2,
                     help='Multiplicator for the cycle.')
 
+parser.add_argument('--clip', type=float, default=5.0,
+                    help='Clip gradients according to global norm.')
 
-def record_dataset(filenames, dataset):
+
+def record_dataset(filenames, dataset, mode):
   """Returns an input pipeline Dataset from `filenames`."""
   if dataset == 'cifar10':
     record_bytes = _HEIGHT * _WIDTH * _DEPTH + 1
+    return tf.data.FixedLengthRecordDataset(filenames, record_bytes)
   elif dataset == 'cifar100':
     record_bytes = _HEIGHT * _WIDTH * _DEPTH + 2
-  return tf.data.FixedLengthRecordDataset(filenames, record_bytes)
-
-
+    return tf.data.FixedLengthRecordDataset(filenames, record_bytes)
+  
+  
 def get_filenames(split, mode, data_dir, dataset):
   """Returns a list of filenames."""
   if dataset == 'cifar10':
@@ -191,8 +189,9 @@ def get_filenames(split, mode, data_dir, dataset):
     else:
       return [os.path.join(data_dir, 'test.bin')]
 
+
 def parse_record(raw_record, dataset):
-  """Parse CIFAR-10 image and label from a raw record."""
+  #Parse CIFAR image and label from a raw record.
   # Every record consists of a label followed by the image, with a fixed number
   # of bytes for each.
   if dataset == 'cifar10':
@@ -201,10 +200,10 @@ def parse_record(raw_record, dataset):
     label_bytes = 2
   image_bytes = _HEIGHT * _WIDTH * _DEPTH
   record_bytes = label_bytes + image_bytes
-
+  
   # Convert bytes to a vector of uint8 that is record_bytes long.
   record_vector = tf.decode_raw(raw_record, tf.uint8)
-
+  
   # The first byte represents the label, which we convert from uint8 to int32
   # and then to one-hot.
   if dataset == 'cifar10':
@@ -213,18 +212,19 @@ def parse_record(raw_record, dataset):
   elif dataset == 'cifar100':
     label = tf.cast(record_vector[1], tf.int32)
     label = tf.one_hot(label, 100)
-
+  
   # The remaining bytes after the label represent the image, which we reshape
   # from [depth * height * width] to [depth, height, width].
   depth_major = tf.reshape(
       record_vector[label_bytes:record_bytes], [_DEPTH, _HEIGHT, _WIDTH])
-
+  
   # Convert from [depth, height, width] to [height, width, depth], and cast as
   # float32.
   image = tf.cast(tf.transpose(depth_major, [1, 2, 0]), tf.float32)
-
+  
   return image, label
-
+  
+    
 
 def preprocess_image(image, mode, cutout_size):
   """Preprocess a single image of layout [height, width, depth]."""
@@ -267,15 +267,12 @@ def input_fn(split, mode, data_dir, dataset, batch_size, cutout_size, num_epochs
   Returns:
     A tuple of images and labels.
   """
-  data_set = record_dataset(get_filenames(split, mode, data_dir, dataset), dataset)
+  data_set = record_dataset(get_filenames(split, mode, data_dir, dataset), dataset, mode)
 
   if mode == 'train':
-    if split:
-      data_set = data_set.shuffle(buffer_size=_NUM_IMAGES['train'])
-    else:
-      data_set = data_set.shuffle(buffer_size=_NUM_IMAGES['train']+_NUM_IMAGES['valid'])
+      data_set = data_set.shuffle(buffer_size=50000)
 
-  data_set = data_set.map(lambda x:parse_record(x, dataset), num_parallel_calls=4)
+  data_set = data_set.map(lambda x:parse_record(x, dataset), num_parallel_calls=16)
   data_set = data_set.map(
       lambda image, label: (preprocess_image(image, mode, cutout_size), label),
       num_parallel_calls=4)
@@ -351,23 +348,32 @@ def get_train_ops(x, y, params, reuse=False):
   if params['lr_schedule'] == 'cosine':
     lr_max = params['lr_max']
     lr_min = params['lr_min']
-    T_0 = tf.constant(params['T_0'], dtype=tf.float32)
-    T_mul = tf.constant(params['T_mul'], dtype=tf.float32)
+    T_0 = params['T_0']
+    T_mul = params['T_mul']
     batches_per_epoch = math.ceil(num_images / params['batch_size'])
     params['batches_per_epoch'] = batches_per_epoch
-    
-    cur_epoch = tf.floor(tf.cast(global_step, dtype=tf.float32) / batches_per_epoch)
-    if params['T_mul'] == 1:
-      cur_i = tf.floor(cur_epoch / T_0)
-      T_beg = T_0 * cur_i
-      T_i = T_0
-    else:
-      cur_i = tf.ceil(tf.log((T_mul - 1.0) * (cur_epoch / T_0 + 1.0)) / tf.log(2.0))
-      T_beg = T_0 * (tf.pow(T_mul, cur_i) - 1.0) / (T_mul - 1.0)
-      T_i = T_0 * tf.pow(T_mul, cur_i)
-        
-    T_cur = cur_epoch - T_beg
-    learning_rate = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + tf.cos(T_cur / T_i * np.pi))
+
+    curr_epoch = tf.cast(global_step // batches_per_epoch, tf.int32)
+
+    last_reset = tf.get_variable("last_reset", initializer=0, dtype=tf.int32, trainable=False)
+    T_i = tf.get_variable("T_i", initializer=T_0, dtype=tf.int32, trainable=False)
+    T_curr = curr_epoch - last_reset
+
+    def _update():
+      update_last_reset = tf.assign(last_reset, curr_epoch, use_locking=True)
+      update_T_i = tf.assign(T_i, T_i * T_mul, use_locking=True)
+      with tf.control_dependencies([update_last_reset, update_T_i]):
+        rate = tf.to_float(T_curr) / tf.to_float(T_i) * 3.1415926
+        lr = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + tf.cos(rate))
+      return lr
+
+    def _no_update():
+      rate = tf.to_float(T_curr) / tf.to_float(T_i) * 3.1415926
+      lr = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + tf.cos(rate))
+      return lr
+
+    learning_rate = tf.cond(
+      tf.greater_equal(T_curr, T_i), _update, _no_update)
   elif params['lr_schedule'] == 'decay':
     batches_per_epoch = num_images / params['batch_size']
     boundaries = [int(batches_per_epoch * epoch) for epoch in [100, 200, 300]]
@@ -427,7 +433,7 @@ def get_train_ops(x, y, params, reuse=False):
     #gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
     #train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
     gradients, variables = zip(*grads)
-    gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
+    gradients, _ = tf.clip_by_global_norm(gradients, params['clip'])
     train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
   
   return loss, learning_rate, train_accuracy, train_op, global_step
@@ -482,13 +488,13 @@ def train(params):
   with g.as_default(), tf.device('/cpu:0'):
     x_train, y_train = input_fn(params['split_train_valid'], 'train', params['data_dir'], params['dataset'], params['batch_size'], params['cutout_size'], None)
     if params['split_train_valid']:
-      x_valid, y_valid = input_fn(params['split_train_valid'], 'valid', params['data_dir'], paramsp['dataset'], 100, None, None)
+      x_valid, y_valid = input_fn(params['split_train_valid'], 'valid', params['data_dir'], params['dataset'], 100, None, None)
     else:
       x_valid, y_valid = None, None
     x_test, y_test = input_fn(False, 'test', params['data_dir'], params['dataset'], 100, None, None)
     train_loss, learning_rate, train_accuracy, train_op, global_step = get_train_ops(x_train, y_train, params)
     _log_variable_sizes(tf.trainable_variables(), 'Trainable Variables')
-    if x_valid and y_valid:
+    if params['split_train_valid']:
       valid_loss, valid_accuracy = get_valid_ops(x_valid, y_valid, params, True)
     test_loss, test_accuracy = get_test_ops(x_test, y_test, params, True)
     saver = tf.train.Saver(max_to_keep=10)
@@ -521,7 +527,7 @@ def train(params):
           log_string += "mins={:<10.2f}".format((curr_time - start_time) / 60)
           tf.logging.info(log_string)
         if global_step_v % params['batches_per_epoch'] == 0:
-          if x_valid and y_valid:
+          if params['split_train_valid']:
             valid_ops = [
               valid_loss, valid_accuracy
             ]
@@ -587,6 +593,7 @@ def get_params():
     params['num_classes'] = 10
   elif params['dataset'] == 'cifar100':
     params['num_classes'] = 100
+    
   params['conv_dag'] = conv_dag
   params['reduc_dag'] = reduc_dag
   params['total_steps'] = total_steps
