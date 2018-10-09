@@ -18,11 +18,8 @@ import model
 import dag
 #from utils import data_parallelism
 
-_WEIGHT_DECAY = 5e-4 #1e-4
-
-_HEIGHT = 331
-_WIDTH = 331
-_DEPTH = 3
+_WEIGHT_DECAY = 3e-5
+_NUM_CLASSES = 1000
 
 _NUM_IMAGES = {
     'train': 1281167,
@@ -30,6 +27,7 @@ _NUM_IMAGES = {
     'test': 50000,
 }
 
+_MOMENTUM = 0.9
 _TEST_BATCH_SIZE = 100
 
 parser = argparse.ArgumentParser()
@@ -51,11 +49,14 @@ parser.add_argument('--model_dir', type=str, default='/tmp/cifar10_model',
 parser.add_argument('--num_nodes', type=int, default=7,
                     help='The number of nodes in a cell.')
 
-parser.add_argument('--N', type=int, default=6,
+parser.add_argument('--N', type=int, default=4,
                     help='The number of stacked convolution cell.')
 
 parser.add_argument('--filters', type=int, default=36,
                     help='The numer of filters.')
+
+parser.add_argument('--input_size', type=int, default=224,
+                    help='The size of input image. 331 for large imagenet setting, 224 for mobile imagenet setting.')
 
 parser.add_argument('--drop_path_keep_prob', type=float, default=0.6,
                     help='Dropout rate.')
@@ -66,13 +67,13 @@ parser.add_argument('--dense_dropout_keep_prob', type=float, default=0.5,
 parser.add_argument('--stem_multiplier', type=float, default=3.0,
                     help='Stem convolution multiplier.')
 
-parser.add_argument('--label_smoothing', type=float, default=0,
+parser.add_argument('--label_smoothing', type=float, default=0.1,
                     help='Label smoothing.')
 
-parser.add_argument('--train_epochs', type=int, default=600,
+parser.add_argument('--train_epochs', type=int, default=300,
                     help='The number of epochs to train.')
 
-parser.add_argument('--epochs_per_eval', type=int, default=10,
+parser.add_argument('--epochs_per_eval', type=int, default=1,
                     help='The number of epochs to run in between evaluations.')
 
 parser.add_argument('--eval_after', type=int, default=0,
@@ -115,6 +116,9 @@ parser.add_argument(
          'provides a performance boost on GPU but is not always compatible '
          'with CPU. If left unspecified, the data format will be chosen '
          'automatically based on whether TensorFlow was built for CPU or GPU.')
+
+parser.add_argument('--optimizer', type=str, default='sgd',
+                    help='Optimizer to use.')
 
 parser.add_argument('--lr', type=float, default='0.001',
                     help='Learning rate when learning rate schedule is constant.')
@@ -164,32 +168,37 @@ def parse_record(raw_record):
   decode_items = list(data_items_to_decoders)
   decoded = decoder.decode(raw_record, items=decode_items)
   image, label = decoded
-  label = tf.one_hot(label, 1001)
+  label = label - 1
+  label = tf.one_hot(label, _NUM_CLASSES)
   return image, label
     
 
-def preprocess_image(image, mode, cutout_size):
+def preprocess_image(image, mode, input_size, cutout_size):
   """Preprocess a single image of layout [height, width, depth]."""
   # convert to [0,1]
   image = tf.image.convert_image_dtype(image, dtype=tf.float32)
   if mode == 'train':
-    image = tf.image.resize_images(image, _HEIGHT, _WIDTH)
-    image.set_shape([_HEIGHT, _WIDTH, _DEPTH])
+    image = tf.image.resize_images(image, [input_size, input_size])
+    image.set_shape([input_size, input_size, 3])
     # Randomly crop a [_HEIGHT, _WIDTH] section of the image.
     #image = tf.random_crop(image, [_HEIGHT, _WIDTH, _DEPTH])
-
     # Randomly flip the image horizontally.
     image = tf.image.random_flip_left_right(image)
+    image = tf.image.random_brightness(image, max_delta=32./255.)
+    image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
+    image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
+    image = tf.image.random_hue(image, max_delta=0.2)
+    image = tf.clip_by_value(image, 0.0, 1.0)
     
   else:
     image = tf.image.central_crop(image, central_fraction=0.875)
     image = tf.expand_dims(image, 0)
-    image = tf.image.resize_bilinear(image, [_HEIGHT, _WIDTH], align_corners=False)
+    image = tf.image.resize_bilinear(image, [input_size, input_size], align_corners=False)
     image = tf.squeeze(image, [0])
 
-  image= tf.sub(image, 0.5)
-  image = tf.mul(image, 2.0)
-
+  image = tf.subtract(image, 0.5)
+  image = tf.multiply(image, 2.0)
+  
   if mode == 'train' and cutout_size is not None:
     mask = tf.ones([cutout_size, cutout_size], dtype=tf.int32)
     start = tf.random_uniform([2], minval=0, maxval=32, dtype=tf.int32)
@@ -203,7 +212,7 @@ def preprocess_image(image, mode, cutout_size):
   return image
 
 
-def input_fn(split, mode, data_dir, batch_size, cutout_size, num_epochs=1):
+def input_fn(split, mode, data_dir, batch_size, input_size, cutout_size, num_epochs=1):
   """Input_fn using the tf.data input pipeline for  dataset.
 
   Args:
@@ -222,7 +231,7 @@ def input_fn(split, mode, data_dir, batch_size, cutout_size, num_epochs=1):
 
   data_set = data_set.map(parse_record, num_parallel_calls=16)
   data_set = data_set.map(
-      lambda image, label: (preprocess_image(image, mode, cutout_size), label),
+      lambda image, label: (preprocess_image(image, mode, input_size, cutout_size), label),
       num_parallel_calls=16)
 
   data_set = data_set.repeat(num_epochs)
@@ -307,16 +316,28 @@ def get_train_ops(x, y, params, reuse=False):
 
   tf.summary.scalar('learning_rate', learning_rate)
 
-  optimizer = tf.train.RMSPropOptimizer(
+  if params['optimizer'] == 'rmsprop':
+    optimizer = tf.train.RMSPropOptimizer(
+        learning_rate=learning_rate,
+        decay = 0.9,
+        epsilon = 1.0)
+  elif params['optimizer'] == 'momentum':
+    optimizer = tf.train.MomentumOptimizer(
       learning_rate=learning_rate,
-      decay = 0.9,
-      epsilon = 1.0)
+      momentum=_MOMENTUM)
+  elif params['optimizer'] == 'sgd':
+    optimizer = tf.train.GradientDescentOptimizer(
+      learning_rate=learning_rate
+    )
+  else:
+    raise ValueError('Unrecoginized optimizer: {}'.format(params['optimizer']))
 
-  inputs = tf.reshape(x, [-1, _HEIGHT, _WIDTH, _DEPTH])
+  inputs = tf.reshape(x, [-1, params['input_size'], params['input_size'], 3])
   labels = y
   inputs_sharded = tf.split(inputs, params['num_gpus'], axis=0)
   labels_sharded = tf.split(labels, params['num_gpus'], axis=0)
   loss_sharded = []
+  cross_entropy_sharded = []
   tower_grads = []
   train_top1_accuracy_sharded = []
   train_top5_accuracy_sharded = []
@@ -337,6 +358,7 @@ def get_train_ops(x, y, params, reuse=False):
         grads = optimizer.compute_gradients(loss)
         tower_grads.append(grads)
         loss_sharded.append(loss)
+        cross_entropy_sharded.append(cross_entropy)
         predictions = logits
         targets = tf.argmax(labels_sharded[i], axis=1)
         train_top1_accuracy = tf.reduce_mean(
@@ -347,6 +369,7 @@ def get_train_ops(x, y, params, reuse=False):
         train_top5_accuracy_sharded.append(train_top5_accuracy)
 
   loss = tf.reduce_mean(loss_sharded, axis=0)
+  cross_entropy = tf.reduce_mean(cross_entropy_sharded, axis=0)
   tf.summary.scalar('training_loss', loss)
   train_top1_accuracy = tf.reduce_mean(train_top1_accuracy_sharded, axis=0)
   train_top5_accuracy = tf.reduce_mean(train_top5_accuracy_sharded, axis=0)
@@ -363,11 +386,11 @@ def get_train_ops(x, y, params, reuse=False):
     gradients, _ = tf.clip_by_global_norm(gradients, params['clip'])
     train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
   
-  return loss, learning_rate, train_top1_accuracy, train_top5_accuracy, train_op, global_step
+  return cross_entropy, loss, learning_rate, train_top1_accuracy, train_top5_accuracy, train_op, global_step
 
 def get_valid_ops(x, y, params, reuse=False):
   with tf.device('/gpu:0'):
-    inputs = tf.reshape(x, [-1, _HEIGHT, _WIDTH, _DEPTH])
+    inputs = tf.reshape(x, [-1, params['input_size'], params['input_size'], 3])
     labels = y
     res = model.build_model(inputs, params, False, reuse)
     logits = res['logits']
@@ -388,11 +411,11 @@ def get_valid_ops(x, y, params, reuse=False):
       tf.cast(tf.nn.in_top_k(predictions, labels, 1, 'top1'), dtype=tf.float32))
     top5_accuracy = tf.reduce_mean(
       tf.cast(tf.nn.in_top_k(predictions, labels, 5, 'top5'), dtype=tf.float32))
-    return loss, top1_accuracy, top5_accuracy
+    return cross_entropy, loss, top1_accuracy, top5_accuracy
 
 def get_test_ops(x, y, params, reuse=False):
   with tf.device('/gpu:0'):
-    inputs = tf.reshape(x, [-1, _HEIGHT, _WIDTH, _DEPTH])
+    inputs = tf.reshape(x, [-1, params['input_size'], params['input_size'], 3])
     labels = y
     res = model.build_model(inputs, params, False, reuse)
     logits = res['logits']
@@ -414,22 +437,23 @@ def get_test_ops(x, y, params, reuse=False):
       tf.cast(tf.nn.in_top_k(predictions, labels, 1, 'top1'), dtype=tf.float32))
     top5_accuracy = tf.reduce_mean(
       tf.cast(tf.nn.in_top_k(predictions, labels, 5, 'top5'), dtype=tf.float32))
-    return loss, top1_accuracy, top5_accuracy
+    return cross_entropy, loss, top1_accuracy, top5_accuracy
 
 def train(params):
   g = tf.Graph()
   with g.as_default(), tf.device('/cpu:0'):
-    x_train, y_train = input_fn(params['split_train_valid'], 'train', params['data_dir'], params['batch_size'], params['cutout_size'], None)
+    tf.set_random_seed(params['seed'])
+    x_train, y_train = input_fn(params['split_train_valid'], 'train', params['data_dir'], params['batch_size'], params['input_size'], params['cutout_size'], None)
     if params['split_train_valid']:
-      x_valid, y_valid = input_fn(params['split_train_valid'], 'valid', params['data_dir'], 100, None, None)
+      x_valid, y_valid = input_fn(params['split_train_valid'], 'valid', params['data_dir'], 100, params['input_size'], None, None)
     else:
       x_valid, y_valid = None, None
-    x_test, y_test = input_fn(False, 'test', params['data_dir'], 100, None, None)
-    train_loss, learning_rate, train_top1_accuracy, train_top5_accuracy, train_op, global_step = get_train_ops(x_train, y_train, params)
+    x_test, y_test = input_fn(False, 'test', params['data_dir'], 100, params['input_size'], None, None)
+    train_cross_entropy, train_loss, learning_rate, train_top1_accuracy, train_top5_accuracy, train_op, global_step = get_train_ops(x_train, y_train, params)
     _log_variable_sizes(tf.trainable_variables(), 'Trainable Variables')
     if params['split_train_valid']:
-      valid_loss, valid_top1_accuracy, valid_top5_accuracy = get_valid_ops(x_valid, y_valid, params, True)
-    test_loss, test_top1_accuracy, test_top5_accuracy = get_test_ops(x_test, y_test, params, True)
+      valid_cross_entropy, valid_loss, valid_top1_accuracy, valid_top5_accuracy = get_valid_ops(x_valid, y_valid, params, True)
+    test_cross_entropy, test_loss, test_top1_accuracy, test_top5_accuracy = get_test_ops(x_test, y_test, params, True)
     saver = tf.train.Saver(max_to_keep=10)
     checkpoint_saver_hook = tf.train.CheckpointSaverHook(
       params['model_dir'], save_steps=params['batches_per_epoch'], saver=saver)
@@ -441,6 +465,7 @@ def train(params):
       start_time = time.time()
       while True:
         run_ops = [
+          train_cross_entropy,
           train_loss,
           learning_rate,
           train_top1_accuracy,
@@ -448,13 +473,14 @@ def train(params):
           train_op,
           global_step
         ]
-        train_loss_v, learning_rate_v, train_top1_accuracy_v, train_top5_accuracy_v, _, global_step_v = sess.run(run_ops)
+        train_cross_entropy_v, train_loss_v, learning_rate_v, train_top1_accuracy_v, train_top5_accuracy_v, _, global_step_v = sess.run(run_ops)
 
         epoch = global_step_v // params['batches_per_epoch'] 
         curr_time = time.time()
         if global_step_v % 100 == 0:
           log_string = "epoch={:<6d} ".format(epoch)
           log_string += "step={:<6d} ".format(global_step_v)
+          log_string += "cross_entropy={:<6f} ".format(train_cross_entropy_v)
           log_string += "loss={:<6f} ".format(train_loss_v)
           log_string += "learning_rate={:<8.4f} ".format(learning_rate_v)
           log_string += "training_top1_accuracy={:<8.4f} ".format(train_top1_accuracy_v)
@@ -464,14 +490,16 @@ def train(params):
         if global_step_v % params['batches_per_epoch'] == 0:
           if params['split_train_valid']:
             valid_ops = [
-              valid_loss, valid_top1_accuracy, valid_top5_accuracy,
+              valid_cross_entropy, valid_loss, valid_top1_accuracy, valid_top5_accuracy,
             ]
             valid_start_time = time.time()
             valid_loss_list = []
+            valid_cross_entropy_list = []
             valid_top1_accuracy_list = []
             valid_top5_accuracy_list = []
             for _ in range(_NUM_IMAGES['valid'] // 100):
-              valid_loss_v, valid_top1_accuracy_v, valid_top5_accuracy_v = sess.run(valid_ops)
+              valid_cross_entropy_v, valid_loss_v, valid_top1_accuracy_v, valid_top5_accuracy_v = sess.run(valid_ops)
+              valid_cross_entropy_list.append(valid_cross_entropy_v)
               valid_loss_list.append(valid_loss_v)
               valid_top1_accuracy_list.append(valid_top1_accuracy_v)
               valid_top5_accuracy_list.append(valid_top5_accuracy_v)
@@ -479,6 +507,7 @@ def train(params):
             log_string =  "Evaluation on valid data\n"
             log_string += "epoch={:<6d} ".format(epoch)
             log_string += "step={:<6d} ".format(global_step_v)
+            log_string += "cross_entropy={:<6f} ".format(np.mean(valid_cross_entropy_list))
             log_string += "loss={:<6f} ".format(np.mean(valid_loss_list))
             log_string += "learning_rate={:<8.6f} ".format(learning_rate_v)
             log_string += "valid_top1_accuracy={:<8.6f} ".format(np.mean(valid_top1_accuracy_list))
@@ -487,14 +516,16 @@ def train(params):
             tf.logging.info(log_string)
           
           test_ops = [
-            test_loss, test_top1_accuracy, test_top5_accuracy,
+            test_cross_entropy, test_loss, test_top1_accuracy, test_top5_accuracy,
           ]
           test_start_time = time.time()
+          test_cross_entropy_list = []
           test_loss_list = []
           test_top1_accuracy_list = []
           test_top5_accuracy_list = []
           for _ in range(_NUM_IMAGES['test'] // 100):
-            test_loss_v, test_top1_accuracy_v, test_top5_accuracy_v = sess.run(test_ops)
+            test_cross_entropy_v, test_loss_v, test_top1_accuracy_v, test_top5_accuracy_v = sess.run(test_ops)
+            test_cross_entropy_list.append(test_cross_entropy_v)
             test_loss_list.append(test_loss_v)
             test_top1_accuracy_list.append(test_top1_accuracy_v)
             test_top5_accuracy_list.append(test_top5_accuracy_v)
@@ -502,6 +533,7 @@ def train(params):
           log_string =  "Evaluation on test data\n"
           log_string += "epoch={:<6d} ".format(epoch)
           log_string += "step={:<6d} ".format(global_step_v)
+          log_string += "cross_entropy={:<6f} ".format(np.mean(test_cross_entropy_list))
           log_string += "loss={:<6f} ".format(np.mean(test_loss_list))
           log_string += "learning_rate={:<8.6f} ".format(learning_rate_v)
           log_string += "test_top1_accuracy={:<8.6f} ".format(np.mean(test_top1_accuracy_list))
@@ -531,7 +563,7 @@ def get_params():
   
   params = vars(FLAGS)
   
-  params['num_classes'] = 1001
+  params['num_classes'] = _NUM_CLASSES
   params['conv_dag'] = conv_dag
   params['reduc_dag'] = reduc_dag
   params['total_steps'] = total_steps
@@ -555,7 +587,6 @@ def main(unused_argv):
     params = get_params()
     with open(os.path.join(params['model_dir'], 'hparams.json'), 'w') as f:
       json.dump(params, f)
-    tf.set_random_seed(params['seed'])
     train(params)
 
   elif FLAGS.mode == 'test':

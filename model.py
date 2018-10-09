@@ -555,46 +555,40 @@ def _build_aux_head(aux_net, num_classes, params, data_format, is_training):
   return aux_logits
 
 
-def _imagenet_stem(inputs, stem_cell, filters, filter_scaling, stem_multiplier, data_format, is_training):
+def _imagenet_stem(inputs, stem_cell, filters, filter_scaling_rate, stem_multiplier, data_format, is_training):
   """Stem used for models trained on ImageNet."""
   num_stem_cells = 2
 
-  # 149 x 149 x 32
   num_stem_filters = int(32 * stem_multiplier)
-  with tf.variable_scope('conv0'):
+  with tf.variable_scope('stem_conv_3x3'):
     inputs = tf.layers.conv2d(
-      inputs=inputs, filters=int(filters * stem_multiplier), kernel_size=3, strides=2,
+      inputs=inputs, filters=num_stem_filters, kernel_size=3, strides=2,
       padding='VALID', use_bias=_USE_BIAS,
       kernel_initializer=_KERNEL_INITIALIZER,
       data_format=data_format)
-  with tf.variable_scope('conv0_bn'):
+  with tf.variable_scope('stem_conv_bn'):
     inputs = batch_normalization(inputs, data_format, is_training)
 
   # Run the reduction cells
   cell_outputs = [None, inputs]
-  filter_scaling = 1.0 / (filter_scaling**num_stem_cells)
+  filter_scaling = 1.0 / (filter_scaling_rate**num_stem_cells)
   for cell_num in range(num_stem_cells):
-    inputs = stem_cell(
-        inputs,
-        scope='cell_stem_{}'.format(cell_num),
-        filter_scaling=filter_scaling,
-        stride=2,
-        prev_layer=cell_outputs[-2],
-        cell_num=cell_num)
+    with tf.variable_scope('stem_reduction_cell_%d' % (cell_num + 1)):
+      inputs = stem_cell(cell_outputs[-1], filter_scaling, 2, cell_outputs[-2], cell_num)
     cell_outputs.append(inputs)
-    filter_scaling *= filter_scaling
+    filter_scaling *= filter_scaling_rate
   return inputs, cell_outputs
 
 
 def _cifar_stem(inputs, filters, stem_multiplier, data_format, is_training):
   """Stem used for models trained on Cifar."""
-  with tf.variable_scope('layer_1_stem_conv_3x3'):
+  with tf.variable_scope('stem_conv_3x3'):
     inputs = tf.layers.conv2d(
       inputs=inputs, filters=int(filters * stem_multiplier), kernel_size=3, strides=1,
       padding='SAME', use_bias=_USE_BIAS,
       kernel_initializer=_KERNEL_INITIALIZER,
       data_format=data_format)
-  with tf.variable_scope('layer_1_stem_bn'):
+  with tf.variable_scope('stem_bn'):
     inputs = batch_normalization(inputs, data_format, is_training)
   return inputs, [None, inputs]
 
@@ -646,6 +640,8 @@ def build_model(inputs, params, is_training, reuse=False):
  
   num_cells = N * 3
   total_num_cells = num_cells + 2
+  if params['dataset'] == 'imagenet':
+    total_num_cells += 2
 
   convolution_cell = NASCell(filters, conv_dag, num_nodes, drop_path_keep_prob, total_num_cells,
     total_steps, data_format, is_training)
@@ -663,11 +659,11 @@ def build_model(inputs, params, is_training, reuse=False):
 
   with tf.variable_scope('body', reuse=reuse):
     if params['dataset'] in ['cifar10', 'cifar100']:
-      inputs, layers = _cifar_stem(inputs, int(filters*stem_multiplier), data_format, is_training)
+      inputs, layers = _cifar_stem(inputs, filters, stem_multiplier, data_format, is_training)
+      true_cell_num, filter_scaling = 0, 1
     elif params['dataset'] == 'imagenet':
-      inputs, layers = _imagenet_stem(inputs, int(filters * stem_multiplier), data_format, is_training)
-      
-    true_cell_num, filter_scaling = 0, 1
+      inputs, layers = _imagenet_stem(inputs, reduction_cell, filters, 2, stem_multiplier, data_format, is_training)
+      true_cell_num, filter_scaling = 2, 1
 
     for cell_num in range(num_cells):
       strides = 1

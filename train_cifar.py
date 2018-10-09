@@ -155,12 +155,15 @@ def get_filenames(split, mode, data_dir, dataset):
   """Returns a list of filenames."""
   if dataset == 'cifar10':
     if not split:
-      data_dir = os.path.join(data_dir, 'cifar-10-batches-bin')
-
-    assert os.path.exists(data_dir), (
-        'Run cifar10_download_and_extract.py first to download and extract the '
+      assert os.path.exists(os.path.join(data_dir+'data_batch_1.bin')), (
+        'Download and extract the '
         'CIFAR-10 data.')
+    else:
+      assert os.path.exists(os.path.join(data_dir+'valid_batch.bin')), (
+        'Download and extract the '
+        'CIFAR-10 data and split out valid data')
 
+  
     if split:
       if mode == 'train':
         return [
@@ -180,8 +183,6 @@ def get_filenames(split, mode, data_dir, dataset):
         return [os.path.join(data_dir, 'test_batch.bin')]
   
   elif dataset == 'cifar100':
-    data_dir = os.path.join(data_dir, 'cifar-100-binary')
-
     assert os.path.exists(data_dir)
 
     if mode == 'train':
@@ -270,9 +271,12 @@ def input_fn(split, mode, data_dir, dataset, batch_size, cutout_size, num_epochs
   data_set = record_dataset(get_filenames(split, mode, data_dir, dataset), dataset, mode)
 
   if mode == 'train':
-      data_set = data_set.shuffle(buffer_size=50000)
+    if split:
+      dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train'])
+    else:
+      dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train'] + _NUM_IMAGES['valid'])
 
-  data_set = data_set.map(lambda x:parse_record(x, dataset), num_parallel_calls=16)
+  data_set = data_set.map(lambda x:parse_record(x, dataset), num_parallel_calls=4)
   data_set = data_set.map(
       lambda image, label: (preprocess_image(image, mode, cutout_size), label),
       num_parallel_calls=4)
@@ -486,6 +490,7 @@ def get_test_ops(x, y, params, reuse=False):
 def train(params):
   g = tf.Graph()
   with g.as_default(), tf.device('/cpu:0'):
+    tf.set_random_seed(params['seed'])
     x_train, y_train = input_fn(params['split_train_valid'], 'train', params['data_dir'], params['dataset'], params['batch_size'], params['cutout_size'], None)
     if params['split_train_valid']:
       x_valid, y_valid = input_fn(params['split_train_valid'], 'valid', params['data_dir'], params['dataset'], 100, None, None)
@@ -497,7 +502,7 @@ def train(params):
     if params['split_train_valid']:
       valid_loss, valid_accuracy = get_valid_ops(x_valid, y_valid, params, True)
     test_loss, test_accuracy = get_test_ops(x_test, y_test, params, True)
-    saver = tf.train.Saver(max_to_keep=10)
+    saver = tf.train.Saver(max_to_keep=1000)
     checkpoint_saver_hook = tf.train.CheckpointSaverHook(
       params['model_dir'], save_steps=params['batches_per_epoch'], saver=saver)
     hooks = [checkpoint_saver_hook]
@@ -617,7 +622,6 @@ def main(unused_argv):
     params = get_params()
     with open(os.path.join(params['model_dir'], 'hparams.json'), 'w') as f:
       json.dump(params, f)
-    tf.set_random_seed(params['seed'])
     train(params)
 
   elif FLAGS.mode == 'test':
