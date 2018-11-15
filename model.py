@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 
 from six.moves import xrange
-from collections import namedtuple, OrderedDict
 import tensorflow as tf
 
 _BATCH_NORM_DECAY = 0.9 #0.997
@@ -561,23 +560,23 @@ def _imagenet_stem(inputs, stem_cell, filters, filter_scaling_rate, stem_multipl
 
   num_stem_filters = int(32 * stem_multiplier)
   with tf.variable_scope('stem_conv_3x3'):
-    inputs = tf.layers.conv2d(
+    net = tf.layers.conv2d(
       inputs=inputs, filters=num_stem_filters, kernel_size=3, strides=2,
       padding='VALID', use_bias=_USE_BIAS,
       kernel_initializer=_KERNEL_INITIALIZER,
       data_format=data_format)
   with tf.variable_scope('stem_conv_bn'):
-    inputs = batch_normalization(inputs, data_format, is_training)
+    net = batch_normalization(net, data_format, is_training)
 
   # Run the reduction cells
-  cell_outputs = [None, inputs]
+  cell_outputs = [None, net]
   filter_scaling = 1.0 / (filter_scaling_rate**num_stem_cells)
   for cell_num in range(num_stem_cells):
     with tf.variable_scope('stem_reduction_cell_%d' % (cell_num + 1)):
-      inputs = stem_cell(cell_outputs[-1], filter_scaling, 2, cell_outputs[-2], cell_num)
-    cell_outputs.append(inputs)
+      net = stem_cell(net, filter_scaling, 2, cell_outputs[-2], cell_num)
+    cell_outputs.append(net)
     filter_scaling *= filter_scaling_rate
-  return inputs, cell_outputs
+  return net, cell_outputs
 
 
 def _cifar_stem(inputs, filters, stem_multiplier, data_format, is_training):
@@ -616,12 +615,13 @@ def build_model(inputs, params, is_training, reuse=False):
   conv_dag = params['conv_dag']
   reduc_dag = params['reduc_dag']
   N = params['N']
-  num_nodes = params['num_nodes']
+  num_nodes = params['num_nodes']+2
   if is_training:
     drop_path_keep_prob = params['drop_path_keep_prob']
+    dense_dropout_keep_prob = params['dense_dropout_keep_prob']
   else:
     drop_path_keep_prob = 1.0
-  dense_dropout_keep_prob = params['dense_dropout_keep_prob']
+    dense_dropout_keep_prob = 1.0
   total_steps = params['total_steps']
   if params['data_format'] is None:
     data_format = 'channels_first' if tf.test.is_built_with_cuda() else 'channels_last'
@@ -648,55 +648,57 @@ def build_model(inputs, params, is_training, reuse=False):
   reduction_cell = NASCell(filters, reduc_dag, num_nodes, drop_path_keep_prob, total_num_cells,
     total_steps, data_format, is_training)
 
-  reduction_layers = []
+  reduction_indices = []
   for pool_num in range(1, 3):
-    layer_num = (float(pool_num) / (2 + 1)) * num_cells
-    layer_num = int(layer_num)
-    reduction_layers.append(layer_num)
+    layer_index = int((float(pool_num) / (2 + 1)) * num_cells)
+    reduction_indices.append(layer_index)
 
-  if len(reduction_layers) >= 2:
-    aux_head_ceill_index = reduction_layers[1]  #- 1
-
+  if len(reduction_indices) >= 2:
+    aux_head_ceill_index = reduction_indices[1] - 1 #[TODO]
+  filter_scaling = 1.0
   with tf.variable_scope('body', reuse=reuse):
     if params['dataset'] in ['cifar10', 'cifar100']:
-      inputs, layers = _cifar_stem(inputs, filters, stem_multiplier, data_format, is_training)
-      true_cell_num, filter_scaling = 0, 1
+      net, cell_outputs = _cifar_stem(inputs, filters, stem_multiplier, data_format, is_training)
+      true_cell_num = 0
     elif params['dataset'] == 'imagenet':
-      inputs, layers = _imagenet_stem(inputs, reduction_cell, filters, 2, stem_multiplier, data_format, is_training)
-      true_cell_num, filter_scaling = 2, 1
-
+      net, cell_outputs = _imagenet_stem(inputs, reduction_cell, filters, 2, stem_multiplier, data_format, is_training)
+      true_cell_num = 2
     for cell_num in range(num_cells):
       strides = 1
-      if cell_num in reduction_layers:
+      if params['skip_reduction_layer_input']:
+        prev_layer = cell_outputs[-2]
+      if cell_num in reduction_indices:
         filter_scaling *= 2
-        with tf.variable_scope('reduction_cell_%d' % (reduction_layers.index(cell_num)+1)):
-          inputs = reduction_cell(layers[-1], filter_scaling, 2, layers[-2], true_cell_num)
-        layers.append(inputs)
+        with tf.variable_scope('reduction_cell_%d' % (reduction_indices.index(cell_num)+1)):
+          net = reduction_cell(net, filter_scaling, 2, cell_outputs[-2], true_cell_num)
         true_cell_num += 1
+        cell_outputs.append(net)
+      if not params['skip_reduction_layer_input']:
+        prev_layer = cell_outputs[-2]
       with tf.variable_scope('convolution_cell_%d' % (cell_num+1)):
-        inputs = convolution_cell(layers[-1], filter_scaling, strides, layers[-2], true_cell_num)
-      layers.append(inputs)
+        net = convolution_cell(net, filter_scaling, strides, prev_layer, true_cell_num)
       true_cell_num += 1
+      cell_outputs.append(net)
       if use_aux_head and aux_head_ceill_index == cell_num and num_classes and is_training:
-        aux_logits = _build_aux_head(inputs, num_classes, params, data_format, is_training)
+        aux_logits = _build_aux_head(net, num_classes, params, data_format, is_training)
 
-    inputs = relu(inputs)
+    net = relu(net)
 
-    assert inputs.shape.ndims == 4
+    assert net.shape.ndims == 4
         
     if data_format == 'channels_first':
-      inputs = tf.reduce_mean(inputs, axis=[2,3])
+      net = tf.reduce_mean(net, axis=[2,3])
     else:
-      inputs = tf.reduce_mean(inputs, axis=[1,2])
+      net = tf.reduce_mean(net, axis=[1,2])
       
     # tf.layers.dropout(inputs, rate) where rate is the drop rate
     # tf.nn.dropout(inputs, rate) where rate is the keep prob
-    inputs = tf.layers.dropout(inputs, 1 - dense_dropout_keep_prob, training=is_training)
+    net = tf.layers.dropout(net, 1 - dense_dropout_keep_prob, training=is_training)
 
     with tf.variable_scope('fully_connected_layer'):
-      inputs = tf.layers.dense(inputs=inputs, units=num_classes)#, use_bias=_USE_BIAS)
+      logits = tf.layers.dense(inputs=net, units=num_classes)#, use_bias=_USE_BIAS)
 
-  res = {'logits': inputs}
+  res = {'logits': logits}
   if use_aux_head and is_training:
     res['aux_logits'] = aux_logits
   return res

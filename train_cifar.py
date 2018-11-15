@@ -7,16 +7,11 @@ import os
 import sys
 import numpy as np
 import tensorflow as tf
-import random
-from collections import OrderedDict
-from six.moves import xrange
 import json
 import math
 import time
-import datetime
 import model
 import dag
-#from utils import data_parallelism
 
 _HEIGHT = 32
 _WIDTH = 32
@@ -50,8 +45,11 @@ parser.add_argument('--dataset', type=str, default='cifar10',
 parser.add_argument('--model_dir', type=str, default='/tmp/cifar10_model',
                     help='The directory where the model will be stored.')
 
-parser.add_argument('--num_nodes', type=int, default=7,
+parser.add_argument('--num_nodes', type=int, default=5,
                     help='The number of nodes in a cell.')
+
+parser.add_argument('--skip_reduction_layer_input', type=int, default=0,
+                    help='0 for cifar, do not change.')
 
 parser.add_argument('--N', type=int, default=6,
                     help='The number of stacked convolution cell.')
@@ -80,8 +78,8 @@ parser.add_argument('--eval_after', type=int, default=0,
 parser.add_argument('--batch_size', type=int, default=128,
                     help='The number of images per batch.')
 
-parser.add_argument('--dag', type=str, default=None,
-                    help='Default dag to run.')
+parser.add_argument('--arch', type=str, default=None,
+                    help='Default architecture to run.')
 
 parser.add_argument('--hparams', type=str, default=None,
                     help='hparams file. All the params will be overrided by this file.')
@@ -272,9 +270,9 @@ def input_fn(split, mode, data_dir, dataset, batch_size, cutout_size, num_epochs
 
   if mode == 'train':
     if split:
-      dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train'])
+      data_set = data_set.shuffle(buffer_size=_NUM_IMAGES['train'])
     else:
-      dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train'] + _NUM_IMAGES['valid'])
+      data_set = data_set.shuffle(buffer_size=_NUM_IMAGES['train'] + _NUM_IMAGES['valid'])
 
   data_set = data_set.map(lambda x:parse_record(x, dataset), num_parallel_calls=4)
   data_set = data_set.map(
@@ -580,13 +578,18 @@ def build_dag(dag_name_or_path):
   try:
     conv_dag, reduc_dag = eval('dag.{}()'.format(dag_name_or_path))
   except:
-    conv_dag, reduc_dag = None, None
+    try:
+      with open(os.path.join(dag_name_or_path), 'r') as f:
+        content = json.load(f)
+        conv_dag, reduc_dag = content['conv_dag'], content['reduc_dag']
+    except:
+      conv_dag, reduc_dag = None, None
 
   return conv_dag, reduc_dag
 
 
 def get_params():
-  conv_dag, reduc_dag = build_dag(FLAGS.dag)
+  conv_dag, reduc_dag = build_dag(FLAGS.arch)
   
   if FLAGS.split_train_valid:
     total_steps = int(FLAGS.train_epochs * _NUM_IMAGES['train'] / float(FLAGS.batch_size))
