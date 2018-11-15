@@ -399,6 +399,7 @@ def train(params):
     with tf.train.SingularMonitoredSession(
       config=config, hooks=hooks, checkpoint_dir=params['model_dir']) as sess:
       start_time = time.time()
+      calcluate_flops(g, sess)
       while True:
         run_ops = [
           train_cross_entropy,
