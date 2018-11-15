@@ -469,7 +469,7 @@ def build_dag(dag_name_or_path):
 
 
 def get_params():
-  conv_dag, reduc_dag = build_dag(FLAGS.dag)
+  conv_dag, reduc_dag = build_dag(FLAGS.arch)
   total_steps = int(FLAGS.train_epochs * (_NUM_IMAGES['train']  / float(FLAGS.batch_size)))
   params = vars(FLAGS)
   params['num_classes'] = _NUM_CLASSES
