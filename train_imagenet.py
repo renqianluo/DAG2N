@@ -10,6 +10,7 @@ import math
 import time
 import numpy as np
 import tensorflow as tf
+from tensorflow.python.framework import graph_util
 from slim.datasets import imagenet
 from slim.preprocessing import inception_preprocessing
 import dag
@@ -328,6 +329,23 @@ def get_test_ops(x, y, params, reuse=False):
     top5_accuracy = tf.reduce_mean(
       tf.cast(tf.nn.in_top_k(predictions, labels, 5, 'top5'), dtype=tf.float32))
     return cross_entropy, loss, top1_accuracy, top5_accuracy
+
+def load_pb(pb):
+  with tf.gfile.GFile(pb, "rb") as f:
+    graph_def = tf.GraphDef()
+    graph_def.ParseFromString(f.read())
+  with tf.Graph().as_default() as graph:
+    tf.import_graph_def(graph_def, name='')
+    return graph
+
+def calcluate_flops(g, sess):
+  output_graph_def = graph_util.convert_variables_to_constants(sess, g.as_default_def(), ['output'])
+  with tf.gfile.GFile('graph.pb', 'wb') as f:
+    f.write(output_graph_def.SerializeToString())
+  g2 = load_pb('./graph.pb')
+  with g2.as_default():
+    flops = tf.profiler.profile(g2, options = tf.profiler.ProfileOptionBuilder.float_operation())
+    print('FLOP is {}'.format(flops))
 
 def train(params):
   g = tf.Graph()
